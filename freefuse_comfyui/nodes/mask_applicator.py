@@ -157,6 +157,8 @@ When enabled, constructs soft attention bias to guide cross-attention:
             model_type_hint=freefuse_data.get("model_type"),
         )
         print(f"[FreeFuse] Detected model type: {model_type}")
+        if model_type == "qwen_image":
+            self._ensure_qwen_image_temporal_wrapper(model_clone)
         
         # Get adapter name to mask mapping
         adapter_mask_map = {}
@@ -206,6 +208,38 @@ When enabled, constructs soft attention bias to guide cross-attention:
         """Detect model type with model-first strategy and optional hint."""
         model_type = detect_model_type(model=model_patcher, model_type_hint=model_type_hint)
         return "sdxl" if model_type == "unknown" else model_type
+
+    def _ensure_qwen_image_temporal_wrapper(self, model_patcher):
+        """Let native Qwen-Image accept standard 4D image latents in Phase 2."""
+        transformer_options = model_patcher.model_options.setdefault("transformer_options", {})
+        if transformer_options.get("freefuse_qwen_temporal_wrapper"):
+            return
+        transformer_options["freefuse_qwen_temporal_wrapper"] = True
+
+        original_wrapper = model_patcher.model_options.get("model_function_wrapper")
+
+        def qwen_temporal_wrapper(model_function, params):
+            input_x = params.get("input", params.get("x"))
+            expanded = input_x is not None and input_x.dim() == 4
+
+            if expanded:
+                params = dict(params)
+                params["input"] = input_x.unsqueeze(2)
+
+            if original_wrapper is not None:
+                output = original_wrapper(model_function, params)
+            else:
+                output = model_function(
+                    params["input"],
+                    params["timestep"],
+                    **params.get("c", {}),
+                )
+
+            if expanded and isinstance(output, torch.Tensor) and output.dim() == 5 and output.shape[2] == 1:
+                output = output.squeeze(2)
+            return output
+
+        model_patcher.set_model_unet_function_wrapper(qwen_temporal_wrapper)
     
     def _apply_attention_bias(
         self,
@@ -275,6 +309,37 @@ When enabled, constructs soft attention bias to guide cross-attention:
                   f"(bias_scale={bias_scale}, positive_scale={positive_bias_scale}, "
                   f"bidirectional={bidirectional}, blocks={bias_blocks})")
         
+        elif model_type == "qwen_image":
+            img_seq_len = latent_h * latent_w
+
+            txt_seq_len = 1024  # Native Qwen-Image text stream is commonly long/unpadded.
+            for positions_list in token_pos_maps.values():
+                if positions_list and positions_list[0]:
+                    max_pos = max(positions_list[0])
+                    txt_seq_len = max(txt_seq_len, max_pos + 10)
+
+            lora_masks_flat = {}
+            for name, mask in mask_dict.items():
+                if name.startswith("_"):
+                    continue
+                if mask.dim() == 3:
+                    mask = mask[0]
+                mask_flat = mask.reshape(-1)
+                lora_masks_flat[name] = mask_flat.unsqueeze(0)
+
+            apply_attention_bias_patches(
+                model_patcher=model_patcher,
+                attention_bias=None,
+                config=config,
+                txt_seq_len=txt_seq_len,
+                model_type="qwen_image",
+                lora_masks=lora_masks_flat,
+                token_pos_maps=token_pos_maps,
+            )
+            print(f"[FreeFuse] Applied attention bias for Qwen-Image "
+                  f"(bias_scale={bias_scale}, positive_scale={positive_bias_scale}, "
+                  f"bidirectional={bidirectional}, img_seq={img_seq_len}, txt_seq>={txt_seq_len})")
+
         elif model_type == "z_image":
             # Z-Image uses unified [img, txt] sequence (image FIRST)
             img_seq_len = latent_h * latent_w

@@ -391,6 +391,10 @@ class MultiAdapterBypassForwardHook:
         - layers.N.attention.qkv, out_proj -> YES (z_image_unified, [txt, img] sequence)
         - layers.N.feed_forward -> YES (z_image_unified)
         - layers.N.adaLN_modulation -> NO (global, not per-token)
+
+        For Qwen-Image:
+        - transformer_blocks.N.attn.to_q/to_k/to_v/to_out and img_mlp -> YES (img_only)
+        - text projections add_q/add_k/add_v/to_add_out, txt_mlp, and modulation -> NO
         
         Returns:
             True if spatial mask should be applied, False otherwise
@@ -410,9 +414,22 @@ class MultiAdapterBypassForwardHook:
         # which would also match Flux patterns. SDXL has down_blocks/mid_block/up_blocks
         # as the outermost structure, while Flux has double_blocks/single_blocks.
         is_sdxl = 'down_blocks' in key or 'mid_block' in key or 'up_blocks' in key
+        is_qwen_image = (
+            not is_sdxl
+            and 'transformer_blocks' in key
+            and 'single_transformer_blocks' not in key
+            and 'single_blocks' not in key
+            and 'double_blocks' not in key
+            and any(s in key for s in [
+                'attn.to_q', 'attn.to_k', 'attn.to_v', 'attn.to_out',
+                'attn.add_q', 'attn.add_k', 'attn.add_v', 'attn.to_add_out',
+                'img_mlp', 'txt_mlp', 'img_mod', 'txt_mod',
+                'img_norm', 'txt_norm', 'norm_added',
+            ])
+        )
         is_flux = ('single_blocks' in key or 'double_blocks' in key) and not is_sdxl
         # Also check for Flux-style transformer_blocks that are NOT inside SDXL structure
-        if not is_sdxl and 'transformer_blocks' in key and 'attentions' not in key:
+        if not is_sdxl and not is_qwen_image and 'transformer_blocks' in key and 'attentions' not in key:
             is_flux = True
         
         # Z-Image: has 'layers.N' pattern without SDXL or Flux markers
@@ -422,6 +439,8 @@ class MultiAdapterBypassForwardHook:
         
         if is_sdxl:
             result, mask_type = self._check_sdxl_layer(key)
+        elif is_qwen_image:
+            result, mask_type = self._check_qwen_image_layer(key)
         elif is_flux:
             result, mask_type = self._check_flux_layer(key)
         elif is_z_image:
@@ -488,6 +507,28 @@ class MultiAdapterBypassForwardHook:
         
         # Default for unknown Flux layers
         return True, 'img_with_text'
+
+    def _check_qwen_image_layer(self, key: str) -> Tuple[bool, Optional[str]]:
+        """
+        Check if a Qwen-Image layer should have spatial mask applied.
+
+        Qwen has separate image and text streams. Spatial masks apply only to
+        image-stream projections and image MLP layers.
+        """
+        if any(s in key for s in [
+            'img_mod', 'txt_mod', 'txt_norm', 'txt_mlp',
+            'attn.add_q', 'attn.add_k', 'attn.add_v', 'attn.to_add_out',
+            'add_q_proj', 'add_k_proj', 'add_v_proj',
+        ]):
+            return False, None
+
+        if any(s in key for s in [
+            'attn.to_q', 'attn.to_k', 'attn.to_v', 'attn.to_out', 'to_out',
+            'img_mlp',
+        ]):
+            return True, 'img_only'
+
+        return False, None
     
     def _check_sdxl_layer(self, key: str) -> Tuple[bool, Optional[str]]:
         """

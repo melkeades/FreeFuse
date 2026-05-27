@@ -2,11 +2,13 @@
 
 FreeFuse for ComfyUI: multi-concept LoRA composition with spatial awareness.
 
-## Workflows (Complete only)
+## Workflows
 
 - [workflows/flux_freefuse_complete.json](workflows/flux_freefuse_complete.json)
 - [workflows/flux2_klein_4b_freefuse_complete.json](workflows/flux2_klein_4b_freefuse_complete.json)
 - [workflows/flux2_klein_9b_freefuse_complete.json](workflows/flux2_klein_9b_freefuse_complete.json)
+- [workflows/qwen_image_2512_freefuse_complete.json](workflows/qwen_image_2512_freefuse_complete.json)
+- [workflows/qwen_image_2512_freefuse_with_editor.json](workflows/qwen_image_2512_freefuse_with_editor.json)
 - [workflows/sdxl_freefuse_complete.json](workflows/sdxl_freefuse_complete.json)
 - [workflows/zimage_freefuse_complete.json](workflows/zimage_freefuse_complete.json)
 
@@ -30,9 +32,21 @@ ln -s /path/to/FreeFuse/comfyui ComfyUI/custom_nodes
 > - Flux: harry_potter_flux.safetensors, daiyu_lin_flux.safetensors
 > - Flux2.Klein 4B: flux-2-klein-4b.safetensors + qwen_3_4b.safetensors + flux2-vae.safetensors
 > - Flux2.Klein 9B: flux-2-klein-9b-fp8.safetensors + qwen_3_8b_fp8mixed.safetensors + flux2-vae.safetensors
+> - Qwen-Image-2512: qwen_image_2512_fp8_e4m3fn.safetensors + qwen_2.5_vl_7b_fp8_scaled.safetensors + qwen_image_vae.safetensors
 > - SDXL: harry_potter_xl.safetensors, daiyu_lin_xl.safetensors
 > - Z-Image-Turbo: Jinx_Arcane_zit.safetensors, skeletor_zit.safetensors
 > If you use the downloads above, rename the files or update the workflow nodes.
+
+**Qwen-Image-2512 model files**
+
+Place the native ComfyUI split files in:
+
+- `models/diffusion_models/qwen_image_2512_fp8_e4m3fn.safetensors`
+- `models/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors`
+- `models/vae/qwen_image_vae.safetensors`
+- Optional/recommended for the fast workflow: `models/loras/Qwen-Image-2512-Lightning-4steps-V1.0-fp32.safetensors`
+
+The Qwen workflows use placeholder subject LoRA names (`qwen_subject_a.safetensors`, `qwen_subject_b.safetensors`). Replace them with your Qwen-Image subject LoRAs and keep each `adapter_name` matched to its concept map entry.
 
 **Prompt**
 
@@ -53,6 +67,7 @@ low quality, blurry, deformed, ugly, bad anatomy
 - Every **subject** `concept_text` (adapter trigger phrase) must appear verbatim in the **main prompt**.
 - If any subject concept is missing from the main prompt, `FreeFuseTokenPositions` / `FreeFuseConceptMapSimple` now raises an error in ComfyUI.
 - `background_text` is optional for runtime safety: if provided but not found in the main prompt, FreeFuse only prints a warning and continues.
+- Qwen-Image uses explicit `background_text` only; automatic background-token fallback is intentionally disabled because the native Qwen prompt template is trimmed before conditioning.
 
 Example:
 - `concept_text = "harry potter"` means your main prompt must contain `"harry potter"`.
@@ -61,11 +76,11 @@ Example:
 
 ### Phase 1 (FreeFuse Phase1 Sampler)
 
-- `steps`: Total steps for Phase 2 (keep consistent for the same noise schedule)
+- `steps`: Total steps for the denoise schedule. Match this to Phase 2.
 - `collect_step`: Which step to collect attention and early-stop
-- `collect_block`: Transformer block/layer to extract attention (Flux: `transformer_blocks.<idx>`, Flux2: `single_transformer_blocks.<idx>`, Z-Image: `layers.<idx>`, SDXL ignored)
-- `collect_block_end`: Optional inclusive end index for range-mode collection (Flux/Flux2/Z-Image). Set `collect_block_end > collect_block` to enable majority-vote aggregation across blocks.
-- `temperature`: Softmax temperature for similarity; 0 = auto (Flux/Flux2=4000, SDXL=300)
+- `collect_block`: Transformer block/layer to extract attention (Flux/Qwen-Image: `transformer_blocks.<idx>`, Flux2: `single_transformer_blocks.<idx>`, Z-Image: `layers.<idx>`, SDXL ignored)
+- `collect_block_end`: Optional inclusive end index for range-mode collection (Flux/Flux2/Z-Image/Qwen-Image). Set `collect_block_end > collect_block` to enable majority-vote aggregation across blocks.
+- `temperature`: Softmax temperature for similarity; 0 = auto (Flux/Flux2/Qwen-Image/Z-Image=4000, SDXL=300)
 - `top_k_ratio`: Ratio of top-k tokens used for similarity
 - `disable_lora_phase1`: Disable LoRA in Phase 1 (recommended for cleaner attention)
 - `bg_scale`: Background similarity scale (higher = more background)
@@ -86,6 +101,7 @@ Example:
 
 - Flux uses FluxGuidance for CFG; set KSampler CFG to 1.0
 - Flux2.Klein uses CLIPTextEncode + CLIPLoader(type=`flux2`); keep KSampler CFG at 1.0 as a safe default
+- Qwen-Image-2512 uses CLIPLoader(type=`qwen_image`) and ModelSamplingAuraFlow shift 3.1. Match Phase 1 to Phase 2. For the Lightning 4-step LoRA workflow use steps 4, CFG 1.0, collect_step 2, collect_block 30, temperature 4000, top_k_ratio 0.3. For non-Lightning/base Qwen use the matching base Phase 2 schedule instead.
 - SDXL uses KSampler CFG directly (recommended 7.0)
 
 ## Preview Image

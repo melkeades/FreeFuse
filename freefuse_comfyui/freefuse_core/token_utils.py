@@ -21,6 +21,19 @@ LUMINA2_SYSTEM_PROMPT = (
 # Flux2.Klein should match diffusers apply_chat_template(..., enable_thinking=False).
 KLEIN_NO_THINK_TEMPLATE = "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"
 
+# ComfyUI's native QwenImageTokenizer template. QwenImageTEModel trims the
+# prefix through the second <|im_start|> user header, so positions returned by
+# FreeFuse must be relative to that trimmed conditioning tensor.
+QWEN_IMAGE_TEMPLATE = (
+    "<|im_start|>system\n"
+    "Describe the image by detailing the color, shape, size, texture, quantity, "
+    "text, spatial relationships of the objects and background:"
+    "<|im_end|>\n<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"
+)
+QWEN_IMAGE_IM_START_ID = 151644
+QWEN_IMAGE_USER_ID = 872
+QWEN_IMAGE_NEWLINE_ID = 198
+
 
 # Stopwords and punctuation to filter (shared between both methods)
 STOPWORDS = {
@@ -83,6 +96,15 @@ def _normalize_model_type(model_type: Optional[str]) -> Optional[str]:
         "z-image": "z_image",
         "lumina2": "z_image",
         "nextdit": "z_image",
+        "qwenimage": "qwen_image",
+        "qwen-image": "qwen_image",
+        "qwen image": "qwen_image",
+        "qwen_image_2512": "qwen_image",
+        "qwen-image-2512": "qwen_image",
+        "qwen image 2512": "qwen_image",
+        "qwenimage2512": "qwen_image",
+        "qwen25_7b": "qwen_image",
+        "qwen2.5-vl-7b": "qwen_image",
         "flux1": "flux",
         "flux2.klein": "flux2",
         "flux2_klein": "flux2",
@@ -108,13 +130,15 @@ def detect_model_type_from_model(model) -> str:
         model: ComfyUI model patcher or inner model object
 
     Returns:
-        'flux', 'flux2', 'sdxl', 'z_image', or 'unknown'
+        'flux', 'flux2', 'sdxl', 'z_image', 'qwen_image', or 'unknown'
     """
     core_model = _extract_model_core(model)
     if core_model is None:
         return "unknown"
 
     model_cls = core_model.__class__.__name__.lower()
+    if "qwenimage" in model_cls or "qwen_image" in model_cls:
+        return "qwen_image"
     if "nextdit" in model_cls or "lumina" in model_cls:
         return "z_image"
     if "flux2" in model_cls:
@@ -126,6 +150,8 @@ def detect_model_type_from_model(model) -> str:
     dm = getattr(core_model, "diffusion_model", None)
     if dm is not None:
         dm_cls = dm.__class__.__name__.lower()
+        if "qwenimage" in dm_cls or "qwen_image" in dm_cls:
+            return "qwen_image"
         if "nextdit" in dm_cls or "lumina" in dm_cls:
             return "z_image"
         if "flux2" in dm_cls:
@@ -149,6 +175,8 @@ def detect_model_type_from_model(model) -> str:
             return "flux"
         if image_model == "lumina2":
             return "z_image"
+        if image_model == "qwen_image":
+            return "qwen_image"
 
     if has_flux_block_layout:
         return "flux"
@@ -166,7 +194,8 @@ def detect_model_type(clip=None, model=None, model_type_hint: Optional[str] = No
         model_type_hint: Explicit override or hint from workflow data
         
     Returns:
-        'flux', 'flux2', 'sdxl', 'z_image', 'qwen3', 'sd1', or 'unknown'
+        'flux', 'flux2', 'sdxl', 'z_image', 'qwen_image', 'qwen3', 'sd1',
+        or 'unknown'
     """
     normalized_hint = _normalize_model_type(model_type_hint)
     if normalized_hint is not None:
@@ -181,6 +210,8 @@ def detect_model_type(clip=None, model=None, model_type_hint: Optional[str] = No
 
     cond_stage_model = getattr(clip, "cond_stage_model", None)
     cond_stage_name = cond_stage_model.__class__.__name__.lower() if cond_stage_model is not None else ""
+    if "qwenimage" in cond_stage_name or "qwen_image" in cond_stage_name:
+        return "qwen_image"
     if "nextdit" in cond_stage_name or "zimage" in cond_stage_name or "lumina" in cond_stage_name:
         return "z_image"
     if "flux2" in cond_stage_name:
@@ -196,9 +227,19 @@ def detect_model_type(clip=None, model=None, model_type_hint: Optional[str] = No
     clip_key = getattr(tokenizer, "clip", None)
     clip_key_lower = clip_key.lower() if isinstance(clip_key, str) else ""
 
+    tokenizer_attr_names = set(vars(tokenizer).keys()) if hasattr(tokenizer, "__dict__") else set()
+    if (
+        "qwen25_7b" in tokenizer_attr_names
+        or hasattr(tokenizer, "qwen25_7b")
+        or "qwen25" in clip_name
+        or "qwen_image" in clip_name
+        or "qwen25" in clip_key_lower
+        or "qwen_image" in clip_key_lower
+    ):
+        return "qwen_image"
+
     # Qwen3 tokenizer family can be used by both Z-Image and Flux2-Klein.
     # Without model context, treat it as generic qwen3.
-    tokenizer_attr_names = set(vars(tokenizer).keys())
     if (
         any("qwen3" in name.lower() for name in tokenizer_attr_names)
         or "qwen3" in clip_name
@@ -271,13 +312,37 @@ def _resolve_qwen3_tokenizer(tokenizer):
     return None
 
 
+def _resolve_qwen_image_tokenizer(tokenizer):
+    """
+    Resolve native Qwen-Image tokenizer from ComfyUI's qwen25_7b wrapper.
+    """
+    if hasattr(tokenizer, "qwen25_7b"):
+        resolved = _extract_nested_tokenizer(getattr(tokenizer, "qwen25_7b"))
+        if resolved is not None:
+            return resolved
+
+    clip_name = str(getattr(tokenizer, "clip_name", "")).lower()
+    clip_key = getattr(tokenizer, "clip", None)
+    if clip_name in {"qwen25_7b", "qwen_image"} and hasattr(tokenizer, clip_name):
+        resolved = _extract_nested_tokenizer(getattr(tokenizer, clip_name))
+        if resolved is not None:
+            return resolved
+    if isinstance(clip_key, str) and clip_key in {"qwen25_7b", "qwen_image"} and hasattr(tokenizer, clip_key):
+        resolved = _extract_nested_tokenizer(getattr(tokenizer, clip_key))
+        if resolved is not None:
+            return resolved
+
+    return None
+
+
 def get_tokenizer_for_model(clip, model_type: str = None):
     """
     Get the appropriate tokenizer object from CLIP.
     
     Args:
         clip: ComfyUI CLIP object
-        model_type: Optional override ('flux', 'flux2', 'sdxl', 'sd1', 'z_image', 'qwen3')
+        model_type: Optional override ('flux', 'flux2', 'sdxl', 'sd1',
+                    'z_image', 'qwen_image', 'qwen3')
         
     Returns:
         The underlying tokenizer object
@@ -290,6 +355,11 @@ def get_tokenizer_for_model(clip, model_type: str = None):
     tokenizer = getattr(clip, "tokenizer", None)
     if tokenizer is None:
         raise ValueError("Could not find clip.tokenizer on CLIP object.")
+
+    if model_type == "qwen_image":
+        resolved = _resolve_qwen_image_tokenizer(tokenizer)
+        if resolved is not None:
+            return resolved
 
     if model_type in ("z_image", "flux2", "qwen3"):
         resolved = _resolve_qwen3_tokenizer(tokenizer)
@@ -312,7 +382,7 @@ def get_tokenizer_for_model(clip, model_type: str = None):
             return resolved
 
     # Best-effort fallback chain
-    for key in ("t5xxl", "clip_l", "clip_g"):
+    for key in ("qwen25_7b", "t5xxl", "clip_l", "clip_g"):
         if hasattr(tokenizer, key):
             resolved = _extract_nested_tokenizer(getattr(tokenizer, key))
             if resolved is not None:
@@ -480,7 +550,7 @@ def _flatten_chunked_token_ids(token_weight_pairs) -> List[int]:
     if isinstance(token_weight_pairs, dict):
         chunks = None
         # Prefer known text branches first.
-        for key in ("l", "qwen3_8b", "qwen3_4b", "qwen3", "t5xxl", "clip_l", "g"):
+        for key in ("l", "qwen25_7b", "qwen3_8b", "qwen3_4b", "qwen3", "t5xxl", "clip_l", "g"):
             if key in token_weight_pairs:
                 chunks = token_weight_pairs[key]
                 break
@@ -783,6 +853,149 @@ def find_concept_positions_qwen3(
     return concept_pos_map
 
 
+def _qwen_image_trim_start(token_ids: List[int]) -> int:
+    """
+    Match QwenImageTEModel.encode_token_weights() prefix trimming.
+
+    It finds the second <|im_start|>, then skips the `user\n` header when the
+    token ids are present. Returned positions are relative to token_ids[start:].
+    """
+    template_end = -1
+    count_im_start = 0
+    for i, token_id in enumerate(token_ids):
+        if int(token_id) == QWEN_IMAGE_IM_START_ID and count_im_start < 2:
+            template_end = i
+            count_im_start += 1
+
+    if template_end < 0:
+        return 0
+
+    if len(token_ids) > (template_end + 3):
+        if (
+            int(token_ids[template_end + 1]) == QWEN_IMAGE_USER_ID
+            and int(token_ids[template_end + 2]) == QWEN_IMAGE_NEWLINE_ID
+        ):
+            template_end += 3
+
+    return max(template_end, 0)
+
+
+def find_concept_positions_qwen_image(
+    clip,
+    tokenizer,
+    prompts: Union[str, List[str]],
+    concepts: Dict[str, str],
+    filter_meaningless: bool = True,
+    filter_single_char: bool = True,
+) -> Dict[str, List[List[int]]]:
+    """
+    Find token positions for ComfyUI native Qwen-Image models.
+
+    ComfyUI tokenizes with QwenImageTokenizer's system/user/assistant template,
+    then QwenImageTEModel trims the system prefix and user header from the
+    conditioning tensor. This function tokenizes the same way and subtracts the
+    exact trim offset so returned positions align with the tensor consumed by
+    QwenImageTransformer2DModel.
+    """
+    if isinstance(prompts, str):
+        prompts = [prompts]
+
+    prompt_data_list = []
+    for prompt in prompts:
+        wrapped_text = QWEN_IMAGE_TEMPLATE.format(prompt)
+
+        try:
+            token_weight_pairs = clip.tokenize(prompt)
+            token_ids = _flatten_chunked_token_ids(token_weight_pairs)
+            if not token_ids:
+                raise ValueError("clip.tokenize returned no token ids")
+        except Exception as e:
+            print(f"[FreeFuse] Warning: Qwen-Image clip.tokenize failed, using direct tokenization: {e}")
+            try:
+                token_ids = tokenizer.encode(wrapped_text, add_special_tokens=False)
+            except Exception:
+                encoded = tokenizer(wrapped_text, add_special_tokens=False)
+                token_ids = encoded["input_ids"] if hasattr(encoded, "keys") else encoded.input_ids
+            if hasattr(token_ids, "tolist"):
+                token_ids = token_ids.tolist()
+
+        trim_start = _qwen_image_trim_start(token_ids)
+        token_texts = [tokenizer.decode([tid]) for tid in token_ids]
+
+        concat_text = ""
+        token_spans = []
+        trimmed_positions = []
+        trimmed_token_texts = []
+        for original_idx, token_text in enumerate(token_texts):
+            start = len(concat_text)
+            concat_text += token_text
+            end = len(concat_text)
+            if original_idx >= trim_start:
+                token_spans.append((start, end))
+                trimmed_positions.append(original_idx - trim_start)
+                trimmed_token_texts.append(token_text)
+
+        prompt_data_list.append({
+            "concat_text": concat_text,
+            "concat_text_lower": concat_text.lower(),
+            "token_spans": token_spans,
+            "trimmed_positions": trimmed_positions,
+            "trimmed_token_texts": trimmed_token_texts,
+        })
+
+    concept_pos_map = {}
+    for concept_name, concept_text in concepts.items():
+        concept_pos_map[concept_name] = []
+
+        for pd in prompt_data_list:
+            positions = []
+            positions_with_text = []
+
+            search_specs = [(pd["concat_text"], concept_text)]
+            if concept_text.lower() != concept_text:
+                search_specs.append((pd["concat_text_lower"], concept_text.lower()))
+
+            for haystack, needle in search_specs:
+                search_start = 0
+                while needle:
+                    idx = haystack.find(needle, search_start)
+                    if idx == -1:
+                        break
+                    c_start, c_end = idx, idx + len(needle)
+
+                    for tok_i, (ts, te) in enumerate(pd["token_spans"]):
+                        pos = pd["trimmed_positions"][tok_i]
+                        if te > c_start and ts < c_end and pos not in positions:
+                            positions.append(pos)
+                            positions_with_text.append((pos, pd["trimmed_token_texts"][tok_i]))
+                    search_start = idx + 1
+                if positions:
+                    break
+
+            if filter_meaningless and positions_with_text:
+                filtered_positions = [
+                    pos for pos, text in positions_with_text
+                    if not is_meaningless_token(text, check_single_char=filter_single_char)
+                ]
+
+                if not filtered_positions:
+                    non_punct = [
+                        pos for pos, text in positions_with_text
+                        if clean_token_text(text) not in PUNCTUATION
+                    ]
+                    if non_punct:
+                        filtered_positions = non_punct[:1]
+                    elif positions_with_text:
+                        filtered_positions = [positions_with_text[0][0]]
+
+                positions = filtered_positions
+
+            positions.sort()
+            concept_pos_map[concept_name].append(positions)
+
+    return concept_pos_map
+
+
 def find_concept_positions(
     clip,
     prompts: Union[str, List[str]],
@@ -804,7 +1017,8 @@ def find_concept_positions(
                  Example: {'lora_a': 'a woman with red hair', 'lora_b': 'a man in suit'}
         filter_meaningless: Whether to filter stopwords/punctuation tokens
         filter_single_char: Whether to filter single-character tokens
-        model_type: Optional override ('flux', 'flux2', 'sdxl', 'sd1', 'z_image', 'qwen3')
+        model_type: Optional override ('flux', 'flux2', 'sdxl', 'sd1',
+                    'z_image', 'qwen_image', 'qwen3')
         system_prompt: System prompt for Z-Image/Lumina2 alignment (see
                        find_concept_positions_qwen3 for details).
         
@@ -829,7 +1043,13 @@ def find_concept_positions(
     
     tokenizer = get_tokenizer_for_model(clip, model_type)
     
-    if model_type in ('z_image', 'flux2', 'qwen3'):
+    if model_type == "qwen_image":
+        return find_concept_positions_qwen_image(
+            clip, tokenizer, prompts, concepts,
+            filter_meaningless=filter_meaningless,
+            filter_single_char=filter_single_char,
+        )
+    elif model_type in ('z_image', 'flux2', 'qwen3'):
         qwen_template = KLEIN_NO_THINK_TEMPLATE if model_type == "flux2" else None
         return find_concept_positions_qwen3(
             clip, tokenizer, prompts, concepts,
@@ -853,7 +1073,7 @@ def find_concept_positions(
     else:
         raise ValueError(
             f"Unsupported model type: {model_type}. "
-            "Use 'flux', 'flux2', 'sdxl', 'z_image', 'qwen3', or 'sd1'."
+            "Use 'flux', 'flux2', 'sdxl', 'z_image', 'qwen_image', 'qwen3', or 'sd1'."
         )
 
 

@@ -22,6 +22,7 @@ from .attention_replace import (
     FreeFuseFluxAttentionReplace,
     FreeFuseSDXLAttnReplace,
     FreeFuseZImageBlockReplace,
+    FreeFuseQwenImageBlockReplace,
     apply_freefuse_replace_patches,
     compute_flux_similarity_maps_from_outputs,
     compute_flux_similarity_maps_with_qkv,
@@ -40,6 +41,7 @@ from .token_utils import (
     find_concept_positions_t5,
     find_concept_positions_clip,
     find_concept_positions_qwen3,
+    find_concept_positions_qwen_image,
     find_background_positions,
     find_eos_position_t5,
     detect_model_type,
@@ -84,6 +86,7 @@ from .attention_bias_patch import (
     FreeFuseFluxBiasBlockReplace,
     FreeFuseFluxBiasSingleBlockReplace,
     FreeFuseSDXLBiasAttnReplace,
+    FreeFuseQwenImageBiasBlockReplace,
     apply_attention_bias_patches,
 )
 
@@ -106,6 +109,7 @@ __all__ = [
     "FreeFuseFluxAttentionReplace",
     "FreeFuseSDXLAttnReplace",
     "FreeFuseZImageBlockReplace",
+    "FreeFuseQwenImageBlockReplace",
     "apply_freefuse_replace_patches",
     "compute_flux_similarity_maps_from_outputs",
     "compute_flux_similarity_maps_with_qkv",
@@ -119,6 +123,7 @@ __all__ = [
     "find_concept_positions_t5",
     "find_concept_positions_clip",
     "find_concept_positions_qwen3",
+    "find_concept_positions_qwen_image",
     "find_background_positions",
     "find_eos_position_t5",
     "detect_model_type",
@@ -147,6 +152,7 @@ __all__ = [
     "FreeFuseFluxBiasBlockReplace",
     "FreeFuseFluxBiasSingleBlockReplace",
     "FreeFuseSDXLBiasAttnReplace",
+    "FreeFuseQwenImageBiasBlockReplace",
     "apply_attention_bias_patches",
     "create_consensus_similarity_maps",
 ]

@@ -37,6 +37,11 @@ os.chdir(comfyui_dir)
 
 
 def _load_module(module_name: str, path: str):
+    core_dir = os.path.join(freefuse_comfyui_dir, "freefuse_core")
+    abs_path = os.path.abspath(path)
+    if os.path.dirname(abs_path) == os.path.abspath(core_dir):
+        module_name = f"freefuse_comfyui.freefuse_core.{os.path.splitext(os.path.basename(path))[0]}"
+
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Failed to load module spec for {path}")

@@ -33,6 +33,161 @@ from .attention_bias import (
 )
 
 
+def _prepare_additive_attn_mask(
+    mask: Optional[torch.Tensor],
+    device: torch.device,
+    dtype: torch.dtype,
+) -> Optional[torch.Tensor]:
+    """Normalize bool/additive masks to SDPA's broadcastable additive layout."""
+    if mask is None:
+        return None
+
+    if mask.dtype == torch.bool:
+        bool_mask = mask.to(device=device)
+        additive = torch.zeros(mask.shape, device=device, dtype=dtype)
+        additive.masked_fill_(~bool_mask, torch.finfo(dtype).min)
+        mask = additive
+    elif mask.device != device or mask.dtype != dtype:
+        mask = mask.to(device=device, dtype=dtype)
+
+    if mask.dim() == 2:
+        mask = mask.unsqueeze(0).unsqueeze(0)
+    elif mask.dim() == 3:
+        mask = mask.unsqueeze(1)
+    return mask
+
+
+def _freefuse_sdpa_attention(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    heads: int,
+    mask: Optional[torch.Tensor] = None,
+    skip_reshape: bool = False,
+    skip_output_reshape: bool = False,
+    **kwargs,
+) -> torch.Tensor:
+    """
+    Run attention through PyTorch/Comfy SDPA instead of xFormers.
+
+    xFormers rejects dense tensor attention bias on some GPUs/drivers. FreeFuse
+    attention bias is an additive dense mask, so route only biased calls through
+    SDPA. Comfy/PyTorch can still choose FlashAttention-class kernels whenever
+    that is valid for the shape/mask.
+    """
+    if skip_reshape:
+        if q.dim() != 4:
+            raise RuntimeError(
+                f"Expected 4D q/k/v with skip_reshape=True, got q.shape={tuple(q.shape)}"
+            )
+        b = q.shape[0]
+        dim_head = q.shape[-1]
+        input_layout = "bhsd"
+        if q.shape[1] == heads:
+            q_4d, k_4d, v_4d = q, k, v
+        elif q.shape[2] == heads:
+            q_4d = q.transpose(1, 2)
+            k_4d = k.transpose(1, 2)
+            v_4d = v.transpose(1, 2)
+            input_layout = "bshd"
+        else:
+            raise RuntimeError(
+                f"Cannot infer head dimension for q.shape={tuple(q.shape)}, heads={heads}"
+            )
+    else:
+        b, _, inner_dim = q.shape
+        dim_head = inner_dim // heads
+        q_4d, k_4d, v_4d = map(
+            lambda t: t.view(b, -1, heads, dim_head).transpose(1, 2),
+            (q, k, v),
+        )
+        input_layout = "bhsd"
+
+    mask = _prepare_additive_attn_mask(mask, q_4d.device, q_4d.dtype)
+
+    sdpa_kwargs = {
+        "attn_mask": mask,
+        "dropout_p": 0.0,
+        "is_causal": False,
+    }
+    if "scale" in kwargs:
+        sdpa_kwargs["scale"] = kwargs["scale"]
+    if "enable_gqa" in kwargs:
+        sdpa_kwargs["enable_gqa"] = kwargs["enable_gqa"]
+
+    try:
+        out = comfy.ops.scaled_dot_product_attention(q_4d, k_4d, v_4d, **sdpa_kwargs)
+    except TypeError:
+        # Older wrappers may not expose newer SDPA kwargs such as enable_gqa.
+        sdpa_kwargs.pop("enable_gqa", None)
+        try:
+            out = comfy.ops.scaled_dot_product_attention(q_4d, k_4d, v_4d, **sdpa_kwargs)
+        except Exception:
+            out = F.scaled_dot_product_attention(q_4d, k_4d, v_4d, **sdpa_kwargs)
+    except Exception:
+        out = F.scaled_dot_product_attention(q_4d, k_4d, v_4d, **sdpa_kwargs)
+
+    if skip_output_reshape:
+        if input_layout == "bshd":
+            return out.transpose(1, 2)
+        return out
+
+    return out.transpose(1, 2).reshape(b, -1, heads * dim_head)
+
+
+def _make_freefuse_sdpa_attention_override(
+    previous_override: Optional[Callable] = None,
+) -> Callable:
+    """Create an optimized_attention override that handles dense FreeFuse bias."""
+    def attention_override(func: Callable, q, k, v, heads, *args, **kwargs):
+        mask = kwargs.get("mask")
+        if mask is None:
+            if previous_override is not None:
+                return previous_override(func, q, k, v, heads, *args, **kwargs)
+            return func(q, k, v, heads, *args, **kwargs)
+
+        sdpa_extra = {}
+        if "scale" in kwargs:
+            sdpa_extra["scale"] = kwargs["scale"]
+        if "enable_gqa" in kwargs:
+            sdpa_extra["enable_gqa"] = kwargs["enable_gqa"]
+
+        return _freefuse_sdpa_attention(
+            q,
+            k,
+            v,
+            heads,
+            mask=mask,
+            skip_reshape=kwargs.get("skip_reshape", False),
+            skip_output_reshape=kwargs.get("skip_output_reshape", False),
+            **sdpa_extra,
+        )
+
+    return attention_override
+
+
+def _call_block_with_attention_override(
+    original_block: Callable,
+    patched_args: Dict[str, Any],
+    source_transformer_options: Any,
+    attention_override: Callable,
+):
+    """Run a block with the override visible to copied args and closure-held options."""
+    if not isinstance(source_transformer_options, dict):
+        return original_block(patched_args)
+
+    had_previous = "optimized_attention_override" in source_transformer_options
+    previous_value = source_transformer_options.get("optimized_attention_override")
+    source_transformer_options["optimized_attention_override"] = attention_override
+    try:
+        return original_block(patched_args)
+    finally:
+        if had_previous:
+            source_transformer_options["optimized_attention_override"] = previous_value
+        else:
+            source_transformer_options.pop("optimized_attention_override", None)
+
+
 class FreeFuseFluxBiasBlockReplace:
     """
     Block replace patch for Flux that applies attention bias during generation.
@@ -201,7 +356,17 @@ class FreeFuseFluxBiasBlockReplace:
 
                 new_args = dict(args)
                 new_args["attn_mask"] = bias_for_attn
-                return original_block(new_args)
+                new_transformer_options = dict(transformer_options) if isinstance(transformer_options, dict) else {}
+                previous_override = new_transformer_options.get("optimized_attention_override")
+                attention_override = _make_freefuse_sdpa_attention_override(previous_override)
+                new_transformer_options["optimized_attention_override"] = attention_override
+                new_args["transformer_options"] = new_transformer_options
+                return _call_block_with_attention_override(
+                    original_block,
+                    new_args,
+                    transformer_options,
+                    attention_override,
+                )
 
             except Exception as e:
                 logging.warning(f"[FreeFuse] Failed to apply attention bias at block {block_index}: {e}")
@@ -387,7 +552,17 @@ class FreeFuseFluxBiasSingleBlockReplace:
 
                 new_args = dict(args)
                 new_args["attn_mask"] = bias_for_attn
-                return original_block(new_args)
+                new_transformer_options = dict(transformer_options) if isinstance(transformer_options, dict) else {}
+                previous_override = new_transformer_options.get("optimized_attention_override")
+                attention_override = _make_freefuse_sdpa_attention_override(previous_override)
+                new_transformer_options["optimized_attention_override"] = attention_override
+                new_args["transformer_options"] = new_transformer_options
+                return _call_block_with_attention_override(
+                    original_block,
+                    new_args,
+                    transformer_options,
+                    attention_override,
+                )
 
             except Exception as e:
                 logging.warning(f"[FreeFuse] Failed to apply bias to single block {block_index}: {e}")
@@ -866,6 +1041,245 @@ class FreeFuseZImageBiasBlockReplace:
         return block_replace
 
 
+class FreeFuseQwenImageBiasBlockReplace:
+    """
+    Block replace patch for ComfyUI native Qwen-Image attention bias.
+
+    Qwen-Image transformer blocks use dual streams but joint attention is built
+    in [txt, img] order, matching construct_attention_bias() directly.
+    """
+
+    def __init__(
+        self,
+        lora_masks: Dict[str, torch.Tensor],
+        token_pos_maps: Dict[str, List[List[int]]],
+        config: AttentionBiasConfig,
+        block_index: int,
+        block=None,
+    ):
+        self.lora_masks = lora_masks
+        self.token_pos_maps = token_pos_maps
+        self.config = config
+        self.block_index = block_index
+        self.block = block
+        self._bias_cache = {}
+
+    def _get_or_build_bias(
+        self,
+        txt_len: int,
+        img_len: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> Optional[torch.Tensor]:
+        cache_key = (txt_len, img_len)
+        if cache_key in self._bias_cache:
+            bias = self._bias_cache[cache_key]
+            if bias is None:
+                return None
+            return bias.to(device=device, dtype=dtype)
+
+        bias = construct_attention_bias(
+            lora_masks=self.lora_masks,
+            token_pos_maps=self.token_pos_maps,
+            txt_seq_len=txt_len,
+            img_seq_len=img_len,
+            bias_scale=self.config.bias_scale,
+            positive_bias_scale=self.config.positive_bias_scale,
+            bidirectional=self.config.bidirectional,
+            use_positive_bias=self.config.use_positive_bias,
+            device=device,
+            dtype=dtype,
+        )
+        self._bias_cache[cache_key] = bias
+        return bias
+
+    @staticmethod
+    def _attention_with_bias(
+        attention,
+        hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        encoder_hidden_states_mask: Optional[torch.Tensor],
+        image_rotary_emb: Optional[torch.Tensor],
+        transformer_options: Dict[str, Any],
+        attention_bias: Optional[torch.Tensor],
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        from comfy.ldm.flux.math import apply_rope1
+
+        batch_size = hidden_states.shape[0]
+        seq_img = hidden_states.shape[1]
+        seq_txt = encoder_hidden_states.shape[1]
+        heads = attention.heads
+
+        img_query = attention.to_q(hidden_states).view(batch_size, seq_img, heads, -1).transpose(1, 2).contiguous()
+        img_key = attention.to_k(hidden_states).view(batch_size, seq_img, heads, -1).transpose(1, 2).contiguous()
+        img_value = attention.to_v(hidden_states).view(batch_size, seq_img, heads, -1).transpose(1, 2)
+
+        txt_query = attention.add_q_proj(encoder_hidden_states).view(batch_size, seq_txt, heads, -1).transpose(1, 2).contiguous()
+        txt_key = attention.add_k_proj(encoder_hidden_states).view(batch_size, seq_txt, heads, -1).transpose(1, 2).contiguous()
+        txt_value = attention.add_v_proj(encoder_hidden_states).view(batch_size, seq_txt, heads, -1).transpose(1, 2)
+
+        img_query = attention.norm_q(img_query)
+        img_key = attention.norm_k(img_key)
+        txt_query = attention.norm_added_q(txt_query)
+        txt_key = attention.norm_added_k(txt_key)
+
+        joint_query = torch.cat([txt_query, img_query], dim=2)
+        joint_key = torch.cat([txt_key, img_key], dim=2)
+        joint_value = torch.cat([txt_value, img_value], dim=2)
+
+        if image_rotary_emb is not None:
+            joint_query = apply_rope1(joint_query, image_rotary_emb)
+            joint_key = apply_rope1(joint_key, image_rotary_emb)
+
+        attn_mask = None
+        if attention_bias is not None:
+            attn_mask = attention_bias
+            if attn_mask.dim() == 3:
+                attn_mask = attn_mask.unsqueeze(1)
+            attn_mask = attn_mask.to(device=joint_query.device, dtype=joint_query.dtype)
+
+        if encoder_hidden_states_mask is not None:
+            key_mask = torch.zeros(
+                batch_size,
+                1,
+                1,
+                seq_txt + seq_img,
+                device=joint_query.device,
+                dtype=joint_query.dtype,
+            )
+            mask = encoder_hidden_states_mask
+            if mask.dtype == torch.bool:
+                key_mask[:, :, :, :seq_txt].masked_fill_(
+                    ~mask.unsqueeze(1).unsqueeze(1),
+                    torch.finfo(joint_query.dtype).min,
+                )
+            else:
+                key_mask[:, :, :, :seq_txt] = mask.to(
+                    device=joint_query.device,
+                    dtype=joint_query.dtype,
+                ).unsqueeze(1).unsqueeze(1)
+            attn_mask = key_mask if attn_mask is None else attn_mask + key_mask
+
+        try:
+            joint_hidden_states = comfy.ops.scaled_dot_product_attention(
+                joint_query,
+                joint_key,
+                joint_value,
+                attn_mask=attn_mask,
+                dropout_p=0.0,
+                is_causal=False,
+            )
+        except Exception:
+            joint_hidden_states = F.scaled_dot_product_attention(
+                joint_query,
+                joint_key,
+                joint_value,
+                attn_mask=attn_mask,
+                dropout_p=0.0,
+                is_causal=False,
+            )
+
+        joint_hidden_states = joint_hidden_states.transpose(1, 2).reshape(
+            batch_size, seq_txt + seq_img, heads * joint_value.shape[-1]
+        )
+        txt_attn_output = joint_hidden_states[:, :seq_txt, :]
+        img_attn_output = joint_hidden_states[:, seq_txt:, :]
+
+        img_attn_output = attention.to_out[0](img_attn_output)
+        img_attn_output = attention.to_out[1](img_attn_output)
+        txt_attn_output = attention.to_add_out(txt_attn_output)
+
+        return img_attn_output, txt_attn_output
+
+    def create_block_replace(self) -> Callable:
+        config = self.config
+        block_index = self.block_index
+        block = self.block
+        bias_builder = self
+
+        def block_replace(args: Dict, extra_args: Dict) -> Dict:
+            hidden_states = args["img"]
+            encoder_hidden_states = args["txt"]
+            temb = args["vec"]
+            image_rotary_emb = args["pe"]
+            timestep_zero_index = args.get("timestep_zero_index")
+            transformer_options = args.get("transformer_options", {})
+            encoder_hidden_states_mask = args.get("encoder_hidden_states_mask")
+            original_block = extra_args["original_block"]
+
+            block_name = f"transformer_blocks.{block_index}"
+            if not config.should_apply_to_block(block_name):
+                return original_block(args)
+
+            if block is None:
+                logging.warning(f"[FreeFuse Qwen-Image] Block {block_index} is None, falling back")
+                return original_block(args)
+
+            try:
+                txt_len = encoder_hidden_states.shape[1]
+                img_len = hidden_states.shape[1]
+                attention_bias = bias_builder._get_or_build_bias(
+                    txt_len=txt_len,
+                    img_len=img_len,
+                    device=hidden_states.device,
+                    dtype=hidden_states.dtype,
+                )
+                if attention_bias is None:
+                    return original_block(args)
+
+                img_mod_params = block.img_mod(temb)
+                txt_temb = temb.chunk(2, dim=0)[0] if timestep_zero_index is not None else temb
+                txt_mod_params = block.txt_mod(txt_temb)
+                img_mod1, img_mod2 = img_mod_params.chunk(2, dim=-1)
+                txt_mod1, txt_mod2 = txt_mod_params.chunk(2, dim=-1)
+
+                img_modulated, img_gate1 = block._modulate(
+                    block.img_norm1(hidden_states), img_mod1, timestep_zero_index
+                )
+                txt_modulated, txt_gate1 = block._modulate(
+                    block.txt_norm1(encoder_hidden_states), txt_mod1
+                )
+
+                img_attn_output, txt_attn_output = self._attention_with_bias(
+                    block.attn,
+                    img_modulated,
+                    txt_modulated,
+                    encoder_hidden_states_mask,
+                    image_rotary_emb,
+                    transformer_options,
+                    attention_bias,
+                )
+
+                hidden_states = block._apply_gate(
+                    img_attn_output, hidden_states, img_gate1, timestep_zero_index
+                )
+                encoder_hidden_states = encoder_hidden_states + txt_gate1 * txt_attn_output
+
+                img_modulated2, img_gate2 = block._modulate(
+                    block.img_norm2(hidden_states), img_mod2, timestep_zero_index
+                )
+                hidden_states = block._apply_gate(
+                    block.img_mlp(img_modulated2), hidden_states, img_gate2, timestep_zero_index
+                )
+
+                txt_modulated2, txt_gate2 = block._modulate(
+                    block.txt_norm2(encoder_hidden_states), txt_mod2
+                )
+                encoder_hidden_states = torch.addcmul(
+                    encoder_hidden_states, txt_gate2, block.txt_mlp(txt_modulated2)
+                )
+
+                return {"img": hidden_states, "txt": encoder_hidden_states}
+
+            except Exception as e:
+                logging.warning(f"[FreeFuse Qwen-Image] Failed to apply attention bias at block {block_index}: {e}")
+                import traceback
+                traceback.print_exc()
+                return original_block(args)
+
+        return block_replace
+
+
 def apply_attention_bias_patches(
     model_patcher,
     attention_bias: torch.Tensor,
@@ -884,7 +1298,7 @@ def apply_attention_bias_patches(
         attention_bias: Pre-computed attention bias for Flux (ignored - use lora_masks instead)
         config: Attention bias configuration
         txt_seq_len: Text sequence length estimate (not used for Flux, actual length determined at runtime)
-        model_type: "flux", "flux2", "z_image", or "sdxl"
+        model_type: "flux", "flux2", "z_image", "qwen_image", or "sdxl"
         lora_masks: Spatial masks for each LoRA (flattened to img_seq_len)
         token_pos_maps: Token positions for each LoRA
         latent_size: Required for SDXL - (H, W) of latent space
@@ -895,6 +1309,11 @@ def apply_attention_bias_patches(
     
     if model_type in ("flux", "flux2"):
         _apply_flux_bias_patches(model_patcher, lora_masks, token_pos_maps, config)
+    elif model_type == "qwen_image":
+        if lora_masks is None or token_pos_maps is None:
+            logging.warning("[FreeFuse] Qwen-Image attention bias requires lora_masks and token_pos_maps")
+            return
+        _apply_qwen_image_bias_patches(model_patcher, lora_masks, token_pos_maps, config)
     elif model_type == "z_image":
         if lora_masks is None or token_pos_maps is None:
             logging.warning("[FreeFuse] Z-Image attention bias requires lora_masks and token_pos_maps")
@@ -1104,3 +1523,94 @@ def _apply_z_image_bias_patches(
             patches_applied += 1
     
     logging.info(f"[FreeFuse] Applied attention bias to {patches_applied} Z-Image transformer layers")
+
+
+def _resolve_qwen_image_bias_config(
+    config: AttentionBiasConfig,
+    num_layers: int,
+) -> AttentionBiasConfig:
+    """Map generic bias block presets onto Qwen transformer_blocks.N names."""
+    apply_to_blocks = config.apply_to_blocks
+
+    if isinstance(apply_to_blocks, str):
+        preset = apply_to_blocks
+        if preset in ("all", "double_stream_only"):
+            apply_to_blocks = None
+        elif preset in ("last_half_double", "last_half"):
+            apply_to_blocks = [
+                f"transformer_blocks.{i}"
+                for i in range(num_layers // 2, num_layers)
+            ]
+        elif preset == "single_stream_only":
+            apply_to_blocks = []
+        else:
+            apply_to_blocks = [preset]
+    elif isinstance(apply_to_blocks, list):
+        if any(p in apply_to_blocks for p in ("all", "double_stream_only")):
+            apply_to_blocks = None
+        elif any(p in apply_to_blocks for p in ("last_half_double", "last_half")):
+            apply_to_blocks = [
+                f"transformer_blocks.{i}"
+                for i in range(num_layers // 2, num_layers)
+            ]
+        elif apply_to_blocks == ["single_stream_only"]:
+            apply_to_blocks = []
+
+    return AttentionBiasConfig(
+        enabled=config.enabled,
+        bias_scale=config.bias_scale,
+        positive_bias_scale=config.positive_bias_scale,
+        bidirectional=config.bidirectional,
+        use_positive_bias=config.use_positive_bias,
+        apply_to_blocks=apply_to_blocks,
+    )
+
+
+def _apply_qwen_image_bias_patches(
+    model_patcher,
+    lora_masks: Dict[str, torch.Tensor],
+    token_pos_maps: Dict[str, List[List[int]]],
+    config: AttentionBiasConfig,
+):
+    """Apply attention bias patches for native Qwen-Image transformer blocks."""
+    if not lora_masks:
+        logging.warning("[FreeFuse] No LoRA masks provided for Qwen-Image attention bias")
+        return
+
+    if not token_pos_maps:
+        logging.warning("[FreeFuse] No token position maps provided for Qwen-Image attention bias")
+        return
+
+    try:
+        diffusion_model = model_patcher.model.diffusion_model
+        transformer_blocks = diffusion_model.transformer_blocks
+        num_layers = len(transformer_blocks)
+    except AttributeError:
+        logging.warning("[FreeFuse] Could not access Qwen-Image transformer_blocks")
+        return
+
+    qwen_config = _resolve_qwen_image_bias_config(config, num_layers)
+
+    patches_applied = 0
+    for i in range(num_layers):
+        block_name = f"transformer_blocks.{i}"
+        if qwen_config.should_apply_to_block(block_name):
+            block = transformer_blocks[i]
+            replacer = FreeFuseQwenImageBiasBlockReplace(
+                lora_masks=lora_masks,
+                token_pos_maps=token_pos_maps,
+                config=qwen_config,
+                block_index=i,
+                block=block,
+            )
+            model_patcher.set_model_patch_replace(
+                replacer.create_block_replace(),
+                "dit",
+                "double_block",
+                i,
+            )
+            patches_applied += 1
+
+    logging.info(
+        f"[FreeFuse] Applied attention bias to {patches_applied} Qwen-Image transformer blocks"
+    )

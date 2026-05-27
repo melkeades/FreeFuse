@@ -717,6 +717,161 @@ def compute_flux_similarity_maps_with_qkv(
     return concept_sim_maps
 
 
+class FreeFuseQwenImageBlockReplace:
+    """
+    QKV-based similarity collector for ComfyUI native Qwen-Image blocks.
+
+    Qwen-Image keeps image/text streams separate inside `transformer_blocks.N`,
+    then joins attention in [txt, img] order. Collection recomputes the same
+    Q/K/V tensors, applies Qwen RoPE, and extracts image-token similarity maps
+    without changing the model output.
+    """
+
+    def __init__(self, state: FreeFuseState, block, block_index: int = 30):
+        self.state = state
+        self.block = block
+        self.block_index = block_index
+
+    @staticmethod
+    def _compute_qwen_qkv(block, img, txt, vec, pe, timestep_zero_index=None):
+        """Recompute modulated Qwen image/text QKV and attention output."""
+        from comfy.ldm.flux.math import apply_rope1
+
+        attn = block.attn
+        batch_size = img.shape[0]
+        seq_img = img.shape[1]
+        seq_txt = txt.shape[1]
+        heads = getattr(attn, "heads", getattr(block, "num_attention_heads", None))
+        if heads is None:
+            raise RuntimeError("Could not resolve Qwen-Image attention head count")
+
+        img_mod_params = block.img_mod(vec)
+        txt_vec = vec.chunk(2, dim=0)[0] if timestep_zero_index is not None else vec
+        txt_mod_params = block.txt_mod(txt_vec)
+        img_mod1, _img_mod2 = img_mod_params.chunk(2, dim=-1)
+        txt_mod1, _txt_mod2 = txt_mod_params.chunk(2, dim=-1)
+
+        img_modulated, _img_gate1 = block._modulate(
+            block.img_norm1(img), img_mod1, timestep_zero_index
+        )
+        txt_modulated, _txt_gate1 = block._modulate(block.txt_norm1(txt), txt_mod1)
+
+        img_q = attn.to_q(img_modulated).view(batch_size, seq_img, heads, -1).transpose(1, 2).contiguous()
+        img_k = attn.to_k(img_modulated).view(batch_size, seq_img, heads, -1).transpose(1, 2).contiguous()
+        img_v = attn.to_v(img_modulated).view(batch_size, seq_img, heads, -1).transpose(1, 2)
+
+        txt_q = attn.add_q_proj(txt_modulated).view(batch_size, seq_txt, heads, -1).transpose(1, 2).contiguous()
+        txt_k = attn.add_k_proj(txt_modulated).view(batch_size, seq_txt, heads, -1).transpose(1, 2).contiguous()
+        txt_v = attn.add_v_proj(txt_modulated).view(batch_size, seq_txt, heads, -1).transpose(1, 2)
+
+        img_q = attn.norm_q(img_q)
+        img_k = attn.norm_k(img_k)
+        txt_q = attn.norm_added_q(txt_q)
+        txt_k = attn.norm_added_k(txt_k)
+
+        joint_q = torch.cat([txt_q, img_q], dim=2)
+        joint_k = torch.cat([txt_k, img_k], dim=2)
+        joint_v = torch.cat([txt_v, img_v], dim=2)
+
+        if pe is not None:
+            joint_q = apply_rope1(joint_q, pe)
+            joint_k = apply_rope1(joint_k, pe)
+
+        attn_out_4d = F.scaled_dot_product_attention(
+            joint_q, joint_k, joint_v, dropout_p=0.0, is_causal=False
+        )
+        attn_out = attn_out_4d.transpose(1, 2).reshape(
+            batch_size, seq_txt + seq_img, heads * joint_v.shape[-1]
+        )
+
+        return {
+            "img_q": joint_q[:, :, seq_txt:, :].transpose(1, 2),
+            "txt_k": joint_k[:, :, :seq_txt, :].transpose(1, 2),
+            "txt_q": joint_q[:, :, :seq_txt, :].transpose(1, 2),
+            "img_k": joint_k[:, :, seq_txt:, :].transpose(1, 2),
+            "img_attn_out": attn_out[:, seq_txt:, :],
+            "txt_len": seq_txt,
+            "img_len": seq_img,
+            "heads": heads,
+            "head_dim": joint_q.shape[-1],
+        }
+
+    def create_block_replace(self) -> Callable:
+        """Create a block replace function for Qwen-Image transformer_blocks.N."""
+        state = self.state
+        block = self.block
+        block_index = self.block_index
+
+        def block_replace(args: Dict, extra_args: Dict) -> Dict:
+            img = args["img"]
+            txt = args["txt"]
+            vec = args["vec"]
+            pe = args["pe"]
+            transformer_options = args.get("transformer_options", {})
+            timestep_zero_index = args.get("timestep_zero_index")
+            original_block = extra_args["original_block"]
+
+            current_step = transformer_options.get("sigmas_index", state.current_step)
+            should_collect = state.is_collect_step(current_step, block_index)
+            if not should_collect:
+                return original_block(args)
+
+            try:
+                if block is None:
+                    logging.warning(
+                        f"[FreeFuse Qwen-Image] Block {block_index} missing reference; skip collection."
+                    )
+                    return original_block(args)
+
+                qkv = self._compute_qwen_qkv(
+                    block=block,
+                    img=img,
+                    txt=txt,
+                    vec=vec,
+                    pe=pe,
+                    timestep_zero_index=timestep_zero_index,
+                )
+
+                state.collected_outputs["img_seq_len"] = qkv["img_len"]
+                state.collected_outputs["txt_len"] = qkv["txt_len"]
+
+                if state.token_pos_maps:
+                    sim_maps = compute_qwen_image_similarity_maps_with_qkv(
+                        img_q=qkv["img_q"],
+                        txt_k=qkv["txt_k"],
+                        txt_q=qkv["txt_q"],
+                        img_k=qkv["img_k"],
+                        img_attn_out=qkv["img_attn_out"],
+                        cap_len=qkv["txt_len"],
+                        img_len=qkv["img_len"],
+                        token_pos_maps=state.token_pos_maps,
+                        top_k_ratio=state.top_k_ratio,
+                        temperature=state.temperature,
+                        n_heads=qkv["heads"],
+                        score_scale=qkv["head_dim"] ** -0.5,
+                    )
+                    state.similarity_maps.update(sim_maps)
+                    if "block_similarity_maps" in state.collected_outputs:
+                        state.collected_outputs["block_similarity_maps"][block_index] = {
+                            name: tensor for name, tensor in sim_maps.items()
+                        }
+                    if hasattr(state, "collected_blocks"):
+                        state.collected_blocks.add(block_index)
+
+                    logging.info(
+                        f"[FreeFuse Qwen-Image] Collected {len(sim_maps)} maps at "
+                        f"transformer_blocks.{block_index}, step {current_step}"
+                    )
+            except Exception as e:
+                logging.warning(f"[FreeFuse Qwen-Image] QKV extraction failed at block {block_index}: {e}")
+                import traceback
+                traceback.print_exc()
+
+            return original_block(args)
+
+        return block_replace
+
+
 class FreeFuseFluxAttentionReplace:
     """
     Alternative: Replace the attention function within Flux blocks.
@@ -1491,6 +1646,8 @@ def compute_z_image_similarity_maps_with_qkv(
     top_k_ratio: float = 0.1,
     temperature: float = 4000.0,
     n_heads: int = 30,
+    score_scale: Optional[float] = None,
+    map_mode: str = "freefuse",
 ) -> Dict[str, torch.Tensor]:
     """
     Compute similarity maps for Z-Image using the full FreeFuse algorithm
@@ -1514,6 +1671,10 @@ def compute_z_image_similarity_maps_with_qkv(
         top_k_ratio: Fraction of image tokens to select as core
         temperature: Softmax temperature for final sim map
         n_heads: Number of attention heads
+        score_scale: Optional QK scale. Defaults to the Z-Image/Flux FreeFuse
+            reference scale; Qwen-Image passes its native attention scale.
+        map_mode: "freefuse" uses top-k hidden-state self similarity. "cross_attn"
+            returns competitive image-to-text cross-attention maps directly.
 
     Returns:
         ``{lora_name: (B, img_len, 1)}``
@@ -1524,7 +1685,7 @@ def compute_z_image_similarity_maps_with_qkv(
 
     device = img_q.device
     B = img_q.shape[0]
-    scale = 1.0 / 1000.0   # same scale as reference FreeFuseZImageAttnProcessor
+    scale = float(score_scale) if score_scale is not None else 1.0 / 1000.0
 
     # ---------- First pass: cross-attn scores per concept ----------
     all_cross_attn_scores: Dict[str, torch.Tensor] = {}
@@ -1559,6 +1720,10 @@ def compute_z_image_similarity_maps_with_qkv(
             if other != lora_name:
                 scores = scores - all_cross_attn_scores[other]
 
+        if map_mode == "cross_attn":
+            concept_sim_maps[lora_name] = scores.unsqueeze(-1)
+            continue
+
         k_count = max(1, int(img_len * top_k_ratio))
         _, topk_idx = torch.topk(scores, k_count, dim=-1)   # (B, k)
 
@@ -1588,6 +1753,10 @@ def compute_z_image_similarity_maps_with_qkv(
         bg_w = F.softmax(bg_w, dim=2)
         bg_scores = bg_w.mean(dim=1).mean(dim=-1)
 
+        if map_mode == "cross_attn":
+            concept_sim_maps[bg_key] = bg_scores.unsqueeze(-1)
+            break
+
         k_count = max(1, int(img_len * top_k_ratio))
         _, bg_topk = torch.topk(bg_scores, k_count, dim=-1)
 
@@ -1600,6 +1769,202 @@ def compute_z_image_similarity_maps_with_qkv(
 
         concept_sim_maps[bg_key] = bg_sim_map
         break   # only first matching key
+
+    return concept_sim_maps
+
+
+def _infer_factor_hw(seq_len: int) -> Tuple[int, int]:
+    """Infer a compact 2D grid for a flattened image-token sequence."""
+    side = int(seq_len ** 0.5)
+    if side * side == seq_len:
+        return side, side
+    for h in range(side, 0, -1):
+        if seq_len % h == 0:
+            return h, seq_len // h
+    return 1, seq_len
+
+
+def _smooth_spatial_scores(scores: torch.Tensor, img_len: int) -> torch.Tensor:
+    """Average-pool noisy image-token scores while preserving shape/range."""
+    h, w = _infer_factor_hw(img_len)
+    if h < 4 or w < 4 or h * w != img_len:
+        return scores
+
+    kernel = max(3, int(min(h, w) * 0.09))
+    if kernel % 2 == 0:
+        kernel += 1
+    kernel = min(kernel, 11)
+
+    spatial = scores.view(scores.shape[0], 1, h, w).float()
+    spatial = F.avg_pool2d(spatial, kernel_size=kernel, stride=1, padding=kernel // 2)
+    flat = spatial.view(scores.shape[0], img_len).to(scores.dtype)
+    return flat
+
+
+def _normalize_spatial_scores(scores: torch.Tensor) -> torch.Tensor:
+    s_min = scores.min(dim=-1, keepdim=True)[0]
+    s_max = scores.max(dim=-1, keepdim=True)[0]
+    return (scores - s_min) / (s_max - s_min + 1e-8)
+
+
+def _focus_spatial_scores(
+    scores: torch.Tensor,
+    low_q: float = 0.42,
+    high_q: float = 0.96,
+    gamma: float = 1.35,
+) -> torch.Tensor:
+    """
+    Keep high-confidence Qwen regions while suppressing broad low-confidence tails.
+
+    Qwen-Image text->image attention often gives a useful peak plus a wide,
+    low-amplitude wash over the whole prompt-side region. Feeding that directly
+    to argmax makes two style LoRAs paint two whole image halves. Quantile
+    contrast keeps the subject peaks and lets the background channel win in
+    shared/uncertain areas.
+    """
+    if scores.numel() == 0:
+        return scores
+
+    scores_f = scores.float()
+    low = torch.quantile(scores_f, low_q, dim=-1, keepdim=True)
+    high = torch.quantile(scores_f, high_q, dim=-1, keepdim=True)
+    focused = ((scores_f - low) / (high - low + 1e-6)).clamp(0.0, 1.0)
+    focused = focused.pow(gamma)
+    return focused.to(dtype=scores.dtype)
+
+
+def _qwen_order_prior(
+    img_len: int,
+    concept_index: int,
+    concept_count: int,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> Optional[torch.Tensor]:
+    """Weak left-to-right prior for Qwen when attention maps are under-localized."""
+    if concept_count <= 1:
+        return None
+    h, w = _infer_factor_hw(img_len)
+    if h * w != img_len or h < 4 or w < 4:
+        return None
+
+    x = torch.linspace(0.0, 1.0, steps=w, device=device, dtype=torch.float32)
+    y = torch.linspace(-1.0, 1.0, steps=h, device=device, dtype=torch.float32)
+    grid_y, grid_x = torch.meshgrid(y, x, indexing="ij")
+
+    center_x = (concept_index + 0.5) / concept_count
+    sigma_x = max(0.18, 0.42 / concept_count)
+    # Keep the prior broad vertically; it should split subjects, not crop them.
+    prior = torch.exp(-((grid_x - center_x) ** 2) / (2.0 * sigma_x ** 2))
+    prior = prior * torch.exp(-(grid_y ** 2) / (2.0 * 1.25 ** 2))
+    prior = prior.reshape(1, img_len)
+    prior = _normalize_spatial_scores(prior).to(device=device, dtype=dtype)
+    return prior
+
+
+def compute_qwen_image_similarity_maps_with_qkv(
+    img_q: torch.Tensor,         # (B, img_len, H, D) after RoPE
+    txt_k: torch.Tensor,         # (B, cap_len, H, D) after RoPE
+    txt_q: torch.Tensor,         # (B, cap_len, H, D) after RoPE
+    img_k: torch.Tensor,         # (B, img_len, H, D) after RoPE
+    img_attn_out: torch.Tensor,  # kept for API symmetry/future fallback
+    cap_len: int,
+    img_len: int,
+    token_pos_maps: Dict[str, List[List[int]]],
+    top_k_ratio: float = 0.3,
+    temperature: float = 4000.0,
+    n_heads: int = 30,
+    score_scale: Optional[float] = None,
+) -> Dict[str, torch.Tensor]:
+    """
+    Compute Qwen-Image concept maps from text-token attention over image keys.
+
+    Qwen-Image's image->text scores were too flat for usable segmentation in
+    practice. The reverse direction, concept text queries attending over image
+    keys, produces an actual spatial distribution. A very weak prompt-order prior
+    is used only as a tiebreaker; confidence focusing and inverse-background
+    scoring keep the shared background from becoming a hard left/right split.
+    """
+    del img_q, txt_k, img_attn_out, top_k_ratio, temperature, n_heads
+
+    concept_sim_maps: Dict[str, torch.Tensor] = {}
+    if not token_pos_maps:
+        return concept_sim_maps
+
+    device = txt_q.device
+    dtype = txt_q.dtype
+    scale = float(score_scale) if score_scale is not None else (txt_q.shape[-1] ** -0.5)
+
+    concept_names = [
+        name for name, positions_list in token_pos_maps.items()
+        if not name.startswith("__") and positions_list and positions_list[0]
+    ]
+    all_scores: Dict[str, torch.Tensor] = {}
+
+    for name in concept_names:
+        pos = token_pos_maps[name][0]
+        pos_t = torch.tensor(pos, device=device, dtype=torch.long).clamp(0, cap_len - 1)
+        concept_q = txt_q[:, pos_t, :, :]  # (B, concept_len, H, D)
+
+        # Text concept queries attend over all image keys.
+        weights = torch.einsum("bjhd,bihd->bhji", concept_q, img_k) * scale
+        weights = F.softmax(weights.float(), dim=-1).to(dtype)
+        scores = weights.mean(dim=1).mean(dim=1)  # (B, img_len)
+        scores = _smooth_spatial_scores(scores, img_len)
+        scores = _normalize_spatial_scores(scores)
+        all_scores[name] = scores
+
+    concept_count = len(all_scores)
+    for concept_index, name in enumerate(concept_names):
+        if name not in all_scores:
+            continue
+        scores = all_scores[name] * max(1, concept_count)
+        for other_name, other_scores in all_scores.items():
+            if other_name != name:
+                scores = scores - other_scores
+        scores = _normalize_spatial_scores(scores)
+
+        prior = _qwen_order_prior(
+            img_len=img_len,
+            concept_index=concept_index,
+            concept_count=concept_count,
+            device=device,
+            dtype=scores.dtype,
+        )
+        if prior is not None:
+            # Keep attention primary. The prior is only a spatial tiebreaker;
+            # too much prior creates the visible "two stitched images" seam.
+            scores = _normalize_spatial_scores((scores * 0.88) + (prior * 0.12))
+
+        scores = _focus_spatial_scores(scores)
+        concept_sim_maps[name] = scores.unsqueeze(-1)
+
+    if concept_names:
+        concept_stack = torch.stack(
+            [concept_sim_maps[name].squeeze(-1) for name in concept_names if name in concept_sim_maps],
+            dim=0,
+        )
+        inverse_background = (1.0 - concept_stack.max(dim=0)[0]).clamp(0.0, 1.0)
+        inverse_background = _smooth_spatial_scores(inverse_background, img_len)
+        inverse_background = _normalize_spatial_scores(inverse_background)
+    else:
+        inverse_background = None
+
+    for bg_key in ["__background__", "__bg__", "__eos__"]:
+        positions_list = token_pos_maps.get(bg_key)
+        if not positions_list or not positions_list[0]:
+            continue
+        bg_pos_t = torch.tensor(
+            positions_list[0], device=device, dtype=torch.long
+        ).clamp(0, cap_len - 1)
+        bg_q = txt_q[:, bg_pos_t, :, :]
+        bg_weights = torch.einsum("bjhd,bihd->bhji", bg_q, img_k) * scale
+        bg_weights = F.softmax(bg_weights.float(), dim=-1).to(dtype)
+        bg_scores = bg_weights.mean(dim=1).mean(dim=1)
+        bg_scores = _normalize_spatial_scores(_smooth_spatial_scores(bg_scores, img_len))
+        if inverse_background is not None:
+            bg_scores = _normalize_spatial_scores((bg_scores * 0.35) + (inverse_background * 0.65))
+        concept_sim_maps[bg_key] = bg_scores.unsqueeze(-1)
+        break
 
     return concept_sim_maps
 
@@ -1744,6 +2109,7 @@ def apply_freefuse_replace_patches(
     flux_collect_blocks: Optional[List[int]] = None,
     flux2_collect_blocks: Optional[List[int]] = None,
     z_image_collect_blocks: Optional[List[int]] = None,
+    qwen_image_collect_blocks: Optional[List[int]] = None,
 ) -> None:
     """
     Apply FreeFuse replace patches to a ComfyUI model.
@@ -1754,7 +2120,7 @@ def apply_freefuse_replace_patches(
     Args:
         model: ComfyUI ModelPatcher object
         state: FreeFuse state
-        model_type: "flux", "flux2", "sdxl", "z_image", or "auto"
+        model_type: "flux", "flux2", "sdxl", "z_image", "qwen_image", or "auto"
         sdxl_collect_blocks: Optional list of (block_name, block_num, tf_index)
                             tuples for SDXL. If None, uses default.
         flux_collect_blocks: Optional Flux `double_blocks` indices for range
@@ -1763,11 +2129,17 @@ def apply_freefuse_replace_patches(
                              collection. If None, uses state.collect_block.
         z_image_collect_blocks: Optional Z-Image `layers` indices for range
                                collection. If None, uses state.collect_block.
+        qwen_image_collect_blocks: Optional Qwen-Image `transformer_blocks`
+                                   indices. If None, uses state.collect_block.
     """
     # Auto-detect model type
     if model_type == "auto":
         model_name = model.model.__class__.__name__.lower()
-        if "nextdit" in model_name or "lumina" in model_name:
+        diffusion_model = getattr(model.model, "diffusion_model", None)
+        diffusion_name = diffusion_model.__class__.__name__.lower() if diffusion_model is not None else ""
+        if "qwenimage" in model_name or "qwen_image" in model_name or "qwenimage" in diffusion_name or "qwen_image" in diffusion_name:
+            model_type = "qwen_image"
+        elif "nextdit" in model_name or "lumina" in model_name:
             model_type = "z_image"
         elif "flux2" in model_name:
             model_type = "flux2"
@@ -1778,7 +2150,55 @@ def apply_freefuse_replace_patches(
     
     logging.info(f"[FreeFuse] Applying AGGRESSIVE replace patches for {model_type} model")
     
-    if model_type == "z_image":
+    if model_type == "qwen_image":
+        diffusion_model = model.model.diffusion_model
+
+        if qwen_image_collect_blocks is None:
+            qwen_image_collect_blocks = [state.collect_block]
+
+        transformer_blocks = getattr(diffusion_model, "transformer_blocks", None)
+        if transformer_blocks is None or len(transformer_blocks) == 0:
+            logging.error("[FreeFuse] Cannot find Qwen-Image transformer_blocks in diffusion model")
+            return
+
+        max_idx = len(transformer_blocks) - 1
+        valid_blocks: List[int] = []
+        for block_index in qwen_image_collect_blocks:
+            if block_index < 0 or block_index > max_idx:
+                logging.warning(
+                    f"[FreeFuse] collect_block={block_index} out of range for "
+                    f"{len(transformer_blocks)} Qwen-Image transformer_blocks; skipping."
+                )
+                continue
+            valid_blocks.append(int(block_index))
+
+        if not valid_blocks:
+            fallback_block = min(max(state.collect_block, 0), max_idx)
+            logging.warning(
+                f"[FreeFuse] No valid Qwen-Image blocks in requested range; "
+                f"falling back to transformer_blocks.{fallback_block}."
+            )
+            valid_blocks = [fallback_block]
+            state.collect_block = fallback_block
+            state.collect_block_end = fallback_block
+
+        for block_index in valid_blocks:
+            block = transformer_blocks[block_index]
+            replacer = FreeFuseQwenImageBlockReplace(
+                state, block=block, block_index=block_index
+            )
+            model.set_model_patch_replace(
+                replacer.create_block_replace(),
+                "dit",
+                "double_block",
+                block_index,
+            )
+            logging.info(
+                f"[FreeFuse] Set QKV-based block replace for Qwen-Image transformer_blocks.{block_index}"
+            )
+            logging.info(f"[FreeFuse] Block type: {type(block).__name__}")
+
+    elif model_type == "z_image":
         # Z-Image uses NextDiT (Lumina) architecture with layers array
         diffusion_model = model.model.diffusion_model
 
@@ -1945,6 +2365,7 @@ __all__ = [
     "FreeFuseFluxAttentionReplace",
     "FreeFuseSDXLAttnReplace",
     "FreeFuseZImageBlockReplace",
+    "FreeFuseQwenImageBlockReplace",
     "compute_flux_similarity_maps_from_outputs",
     "compute_flux_similarity_maps_with_qkv",
     "compute_z_image_similarity_maps",

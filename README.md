@@ -20,6 +20,7 @@
 - [x] Supports FLUX.2-klein-4B/9B  in diffusers
 - [x] Supports FLUX.2-klein-4B/9B in ComfyUI
 - [x] Support ControlNet+FreeFuse in ComfyUI
+- [x] Supports Qwen-Image-2512 in ComfyUI
 - [ ] Exploring FreeFuse in text2video model
 
 ## 📖 Abstract
@@ -72,7 +73,7 @@ cd <your ComfyUI path>/custom_nodes
 git clone --depth 1 --branch comfyui https://github.com/yaoliliu/FreeFuse.git freefuse_comfyui
 ```
 
-You can find workflows for flux.dev and SDXL in the `freefuse_comfyui/workflows` folder. (*^▽^*)
+You can find workflows for flux.dev, SDXL, Z-Image, Flux2.Klein, and Qwen-Image-2512 in the `freefuse_comfyui/workflows` folder. (*^▽^*)
 
 ### Installation with diffusers
 
@@ -144,5 +145,4 @@ Thanks for [Tekemo](https://civarchive.com/users/Tekemo) and [jrewingwannabe947]
 <p align="center">
   <em>FreeFuse solves feature conflicts between multiple subject LoRAs without additional training in flux1.dev, sdxl, z-image and more.</em>
 </p>
-
 

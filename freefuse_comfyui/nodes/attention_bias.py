@@ -209,6 +209,39 @@ Parameters:
                 lora_masks=lora_masks_flat,
                 token_pos_maps=token_pos_maps,
             )
+        elif model_type == "qwen_image":
+            img_seq_len = latent_h * latent_w
+            txt_seq_len = self._estimate_txt_seq_len(token_pos_maps, default=1024)
+
+            lora_masks_flat = {}
+            for name, mask in mask_dict.items():
+                if name.startswith("_"):
+                    continue
+                if mask.dim() == 3:
+                    mask = mask[0]
+                mask_flat = mask.reshape(-1)
+                lora_masks_flat[name] = mask_flat.unsqueeze(0)
+
+            attention_bias = construct_attention_bias(
+                lora_masks=lora_masks_flat,
+                token_pos_maps=token_pos_maps,
+                txt_seq_len=txt_seq_len,
+                img_seq_len=img_seq_len,
+                bias_scale=bias_scale,
+                positive_bias_scale=positive_bias_scale,
+                bidirectional=bidirectional,
+                use_positive_bias=use_positive_bias,
+            )
+
+            apply_attention_bias_patches(
+                model_patcher=model_clone,
+                attention_bias=attention_bias,
+                config=config,
+                txt_seq_len=txt_seq_len,
+                model_type="qwen_image",
+                lora_masks=lora_masks_flat,
+                token_pos_maps=token_pos_maps,
+            )
         elif model_type == "z_image":
             cap_seq_len = self._estimate_txt_seq_len(token_pos_maps, default=256)
 

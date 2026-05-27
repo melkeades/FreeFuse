@@ -80,12 +80,12 @@ class FreeFusePhase1Sampler:
                 "sigmas": ("SIGMAS",),
                 # Block selection — Flux
                 "collect_block": ("INT", {
-                    "default": 18, "min": 0, "max": 56,
-                    "tooltip": "[Flux/Flux2/Z-Image only] Flux uses transformer_blocks.<idx>; Flux2 uses single_transformer_blocks.<idx>; Z-Image uses layers.<idx>. Ignored for SDXL."
+                    "default": 18, "min": 0, "max": 59,
+                    "tooltip": "[Flux/Flux2/Z-Image/Qwen-Image only] Flux and Qwen use transformer_blocks.<idx>; Flux2 uses single_transformer_blocks.<idx>; Z-Image uses layers.<idx>. Ignored for SDXL."
                 }),
                 "collect_block_end": ("INT", {
-                    "default": 18, "min": 0, "max": 56,
-                    "tooltip": "[Flux/Flux2/Z-Image only] Optional end block (inclusive). If > collect_block, collect a range and aggregate by majority voting."
+                    "default": 18, "min": 0, "max": 59,
+                    "tooltip": "[Flux/Flux2/Z-Image/Qwen-Image only] Optional end block (inclusive). If > collect_block, collect a range and aggregate by majority voting."
                 }),
                 # Block selection — SDXL
                 "collect_region": (list(SDXL_COLLECT_REGION_MAP.keys()), {
@@ -172,6 +172,12 @@ Block Selection (model-type aware):
 - Flux2: Set 'collect_block_end' > 'collect_block' to aggregate a block range.
 - Z-Image: Use 'collect_block' (INT 0-56) to pick layers.<idx>.
 - Z-Image: Set 'collect_block_end' > 'collect_block' to aggregate a block range.
+- Qwen-Image: Use 'collect_block' (INT 0-59) to pick transformer_blocks.<idx>.
+- Qwen-Image Phase 1 should use the same steps/cfg schedule as Phase 2.
+  For Qwen-Image-2512 Lightning 4-step LoRA workflows, use steps=4,
+  collect_step=2, cfg=1.0, collect_block=30, temperature=4000,
+  top_k_ratio=0.3, ModelSamplingAuraFlow shift=3.1.
+  For non-Lightning/base Qwen sampling, use the matching base Phase 2 schedule.
 - SDXL: Use 'collect_region' + 'collect_tf_index' to pick a UNet cross-attention block.
   The recommended default is output_early (region) + 3 (tf_index).
   Other parameters for the non-active model type are simply ignored.
@@ -267,11 +273,18 @@ for Phase 2 generation with the same seed and steps."""
             patch_model_type = "z_image"
         else:
             patch_model_type = model_type
+
+        if patch_model_type == "qwen_image" and (steps > 8 or cfg > 1.5):
+            print(
+                "[FreeFuse] Qwen-Image note: Phase 1 should match the Phase 2 "
+                "schedule. For Qwen-Image-2512 Lightning 4-step LoRA workflows, "
+                "use steps=4, collect_step=2, cfg=1.0."
+            )
         
         # Use user-provided parameters, with auto-detection for temperature=0
         # Default temperature differs by model type: Flux=4000, SDXL=300, Z-Image=4000
         if temperature == 0.0:
-            if patch_model_type == "z_image":
+            if patch_model_type in ("z_image", "qwen_image"):
                 auto_temperature = 4000.0   # matches reference FreeFuseZImageAttnProcessor
             elif patch_model_type in ("flux", "flux2"):
                 auto_temperature = 4000.0
@@ -288,6 +301,7 @@ for Phase 2 generation with the same seed and steps."""
         flux_collect_blocks = None
         flux2_collect_blocks = None
         z_image_collect_blocks = None
+        qwen_image_collect_blocks = None
         range_collect_blocks = None
         if patch_model_type == "sdxl":
             region_info = SDXL_COLLECT_REGION_MAP.get(collect_region)
@@ -304,7 +318,7 @@ for Phase 2 generation with the same seed and steps."""
             sdxl_collect_blocks = [(block_name, block_num, tf_idx)]
             print(f"[FreeFuse] SDXL collect block: ({block_name}, {block_num}, {tf_idx}) "
                   f"from region='{collect_region}'")
-        elif patch_model_type in ("flux", "flux2", "z_image"):
+        elif patch_model_type in ("flux", "flux2", "z_image", "qwen_image"):
             range_start = int(collect_block)
             range_end = int(collect_block_end)
             if range_end < range_start:
@@ -321,8 +335,10 @@ for Phase 2 generation with the same seed and steps."""
                     flux_collect_blocks = range_collect_blocks
                 elif patch_model_type == "flux2":
                     flux2_collect_blocks = range_collect_blocks
-                else:
+                elif patch_model_type == "z_image":
                     z_image_collect_blocks = range_collect_blocks
+                else:
+                    qwen_image_collect_blocks = range_collect_blocks
                 print(
                     f"[FreeFuse] {patch_model_type} range mode: collecting blocks {range_start}-{range_end} "
                     f"({len(range_collect_blocks)} blocks)"
@@ -341,14 +357,23 @@ for Phase 2 generation with the same seed and steps."""
             flux_collect_blocks=flux_collect_blocks,
             flux2_collect_blocks=flux2_collect_blocks,
             z_image_collect_blocks=z_image_collect_blocks,
+            qwen_image_collect_blocks=qwen_image_collect_blocks,
         )
         
         # Get latent info
         latent_image = latent["samples"]
+        sample_latent_image = latent_image
+        if patch_model_type == "qwen_image" and latent_image.dim() == 4:
+            sample_latent_image = latent_image.unsqueeze(2)
+            print(
+                "[FreeFuse] Qwen-Image Phase 1: expanded 4D latent to "
+                f"{tuple(sample_latent_image.shape)} for native Qwen transformer input"
+            )
         batch_size = latent_image.shape[0]
         
         # Calculate image dimensions
-        latent_h, latent_w = latent_image.shape[2], latent_image.shape[3]
+        latent_h, latent_w = latent_image.shape[-2], latent_image.shape[-1]
+        latent_t = latent_image.shape[2] if latent_image.dim() == 5 else 1
         img_h, img_w = self._latent_to_image_size(model_clone, latent_h, latent_w)
 
         # For Flux2 single-stream extraction, cache img sequence length for txt_len resolution.
@@ -369,6 +394,22 @@ for Phase 2 generation with the same seed and steps."""
             freefuse_state.collected_outputs["latent_h"] = latent_h
             freefuse_state.collected_outputs["latent_w"] = latent_w
             print(f"[FreeFuse] Z-Image sequence info: img_seq_len={z_img_seq_len}, cap_seq_len={z_cap_seq_len}")
+
+        if patch_model_type == "qwen_image":
+            qwen_img_seq_len = latent_t * (latent_h // 2) * (latent_w // 2)
+            qwen_txt_len = 1024
+            for positions_list in token_pos_maps.values():
+                if positions_list and positions_list[0]:
+                    max_pos = max(positions_list[0])
+                    qwen_txt_len = max(qwen_txt_len, max_pos + 10)
+            freefuse_state.collected_outputs["img_seq_len"] = qwen_img_seq_len
+            freefuse_state.collected_outputs["txt_len"] = qwen_txt_len
+            freefuse_state.collected_outputs["latent_h"] = latent_h
+            freefuse_state.collected_outputs["latent_w"] = latent_w
+            print(
+                f"[FreeFuse] Qwen-Image sequence estimate: img_seq_len={qwen_img_seq_len}, "
+                f"txt_len>={qwen_txt_len}"
+            )
         
         block_info = (
             (
@@ -391,7 +432,15 @@ for Phase 2 generation with the same seed and steps."""
                         else f"layer {collect_block}"
                     )
                     if patch_model_type == "z_image"
-                    else f"{collect_region} tf={collect_tf_index}"
+                    else (
+                        (
+                            f"transformer_blocks.{collect_block}-{collect_block_end}"
+                            if (patch_model_type == "qwen_image" and range_collect_blocks is not None)
+                            else f"transformer_blocks.{collect_block}"
+                        )
+                        if patch_model_type == "qwen_image"
+                        else f"{collect_region} tf={collect_tf_index}"
+                    )
                 )
             )
         )
@@ -411,7 +460,7 @@ for Phase 2 generation with the same seed and steps."""
             print("[FreeFuse] Phase 1: LoRA enabled (user override)")
         
         # Create noise for Phase 1
-        noise = comfy.sample.prepare_noise(latent_image, seed, None)
+        noise = comfy.sample.prepare_noise(sample_latent_image, seed, None)
         
         # Configure step callback to update current step and enable early stopping
         def step_callback(step, x0, x, total_steps):
@@ -453,7 +502,7 @@ for Phase 2 generation with the same seed and steps."""
                 scheduler,
                 conditioning,
                 neg_conditioning,
-                latent_image,
+                sample_latent_image,
                 denoise=1.0,
                 disable_noise=False,
                 start_step=0,
@@ -483,7 +532,7 @@ for Phase 2 generation with the same seed and steps."""
         # Get similarity maps directly from freefuse_state
         similarity_maps = freefuse_state.similarity_maps
 
-        # Optional range-mode aggregation for Flux / Flux2 / Z-Image.
+        # Optional range-mode aggregation for Flux / Flux2 / Z-Image / Qwen-Image.
         if range_collect_blocks and len(range_collect_blocks) > 1:
             block_sim_maps = freefuse_state.collected_outputs.get("block_similarity_maps", {})
             if block_sim_maps:
@@ -613,6 +662,10 @@ for Phase 2 generation with the same seed and steps."""
                 masks[name] = torch.ones(latent_h, latent_w, device=latent_image.device)
             if include_background:
                 masks["_background_"] = torch.zeros(latent_h, latent_w, device=latent_image.device)
+
+        if patch_model_type == "qwen_image" and masks:
+            masks = self._soften_qwen_masks(masks)
+            print("[FreeFuse] Qwen-Image: softened mask edges for shared-background blending")
 
         # Optional debug dump for masks
         if os.environ.get("FREEFUSE_DEBUG_ZIMAGE") == "1" and patch_model_type == "z_image":
@@ -883,6 +936,51 @@ for Phase 2 generation with the same seed and steps."""
         
         print(f"[FreeFuse] Processed {len(result)} similarity maps to spatial format")
         return result
+
+    @staticmethod
+    def _soften_qwen_masks(masks: dict) -> dict:
+        """
+        Slightly feather Qwen subject masks before LoRA application.
+
+        Qwen style LoRAs are visually strong. Hard binary boundaries can create a
+        stitched-image seam even when the semantic mask is correct. A small blur
+        gives the boundary a short blending zone while preserving mask ownership.
+        """
+        softened = {}
+        concept_names = [
+            name for name in masks.keys()
+            if not (str(name).startswith("_") or "background" in str(name).lower())
+        ]
+
+        for name, mask in masks.items():
+            if name not in concept_names or not torch.is_tensor(mask) or mask.dim() != 2:
+                softened[name] = mask
+                continue
+
+            h, w = mask.shape
+            kernel = max(3, int(min(h, w) * 0.06))
+            if kernel % 2 == 0:
+                kernel += 1
+            kernel = min(kernel, 7)
+
+            m = mask.float().unsqueeze(0).unsqueeze(0)
+            m = F.avg_pool2d(m, kernel_size=kernel, stride=1, padding=kernel // 2)
+            softened[name] = m.squeeze(0).squeeze(0).to(device=mask.device, dtype=mask.dtype).clamp(0.0, 1.0)
+
+        if concept_names:
+            concept_masks = [
+                softened[name].float()
+                for name in concept_names
+                if torch.is_tensor(softened.get(name)) and softened[name].dim() == 2
+            ]
+            if concept_masks:
+                bg = (1.0 - torch.stack(concept_masks, dim=0).max(dim=0)[0]).clamp(0.0, 1.0)
+                for name in list(softened.keys()):
+                    if str(name).startswith("_") or "background" in str(name).lower():
+                        old = softened[name]
+                        softened[name] = bg.to(device=old.device, dtype=old.dtype) if torch.is_tensor(old) else bg
+
+        return softened
     
     def _create_preview(self, masks, width, height):
         """Create color-coded mask preview."""
