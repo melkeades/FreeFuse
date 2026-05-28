@@ -109,6 +109,107 @@ def _warn_if_background_text_missing(
     )
 
 
+def _compose_text_parts(parts: List[str], separator: str) -> str:
+    cleaned = [part.strip() for part in parts if isinstance(part, str) and part.strip()]
+    return separator.join(cleaned)
+
+
+def _append_prompt_part(prompt: str, connector: str, part: str) -> str:
+    part = part.strip() if isinstance(part, str) else ""
+    if not part:
+        return prompt.strip()
+
+    prompt = prompt.strip()
+    connector = connector if isinstance(connector, str) else ""
+    if not prompt:
+        return part
+    return f"{prompt}{connector}{part}".strip()
+
+
+class FreeFusePromptComposer:
+    """
+    Build one canonical prompt from FreeFuse concept/background fields.
+
+    Feed this prompt output to both positive conditioning and
+    FreeFuseTokenPositions. This prevents manual copy/paste drift where a
+    concept_text no longer appears verbatim in the prompt.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "freefuse_data": ("FREEFUSE_DATA",),
+            },
+            "optional": {
+                "prompt_prefix": ("STRING", {
+                    "default": "Cinematic image of",
+                    "multiline": True,
+                }),
+                "concept_joiner": ([
+                    ", ",
+                    " and ",
+                    ", and ",
+                    ", standing beside ",
+                    ", next to ",
+                ], {"default": " and "}),
+                "include_background": ("BOOLEAN", {"default": True}),
+                "background_joiner": ([
+                    ", ",
+                    " in ",
+                    " at ",
+                    " with ",
+                    " against ",
+                ], {"default": " in "}),
+                "prompt_suffix": ("STRING", {
+                    "default": "high quality, detailed",
+                    "multiline": True,
+                }),
+            },
+        }
+
+    RETURN_TYPES = ("STRING", "FREEFUSE_DATA")
+    RETURN_NAMES = ("prompt", "freefuse_data")
+    FUNCTION = "compose_prompt"
+    CATEGORY = "FreeFuse"
+
+    def compose_prompt(
+        self,
+        freefuse_data,
+        prompt_prefix="Cinematic image of",
+        concept_joiner=" and ",
+        include_background=True,
+        background_joiner=" in ",
+        prompt_suffix="high quality, detailed",
+    ):
+        data = dict(freefuse_data or {})
+        data["concepts"] = dict(data.get("concepts", {}))
+        data["settings"] = dict(data.get("settings", {}))
+
+        concepts = [
+            text
+            for text in data.get("concepts", {}).values()
+            if isinstance(text, str) and text.strip()
+        ]
+        subjects = _compose_text_parts(concepts, concept_joiner)
+
+        prompt = (prompt_prefix or "").strip()
+        prompt = _append_prompt_part(prompt, " ", subjects)
+
+        background_text = data.get("settings", {}).get("background_text", "")
+        if include_background and isinstance(background_text, str) and background_text.strip():
+            prompt = _append_prompt_part(prompt, background_joiner, background_text)
+
+        suffix = (prompt_suffix or "").strip()
+        if suffix:
+            prompt = _append_prompt_part(prompt, ", ", suffix)
+
+        data["prompt"] = prompt
+        data["settings"]["composed_prompt"] = prompt
+        print(f"[FreeFusePromptComposer] Composed prompt: {prompt}")
+        return (prompt, data)
+
+
 class FreeFuseConceptMap:
     """
     Define mapping between LoRA adapter names and concept text.

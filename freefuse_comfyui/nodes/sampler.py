@@ -958,14 +958,21 @@ for Phase 2 generation with the same seed and steps."""
                 continue
 
             h, w = mask.shape
-            kernel = max(3, int(min(h, w) * 0.06))
+            kernel = max(3, int(min(h, w) * 0.04))
             if kernel % 2 == 0:
                 kernel += 1
-            kernel = min(kernel, 7)
+            kernel = min(kernel, 5)
 
-            m = mask.float().unsqueeze(0).unsqueeze(0)
-            m = F.avg_pool2d(m, kernel_size=kernel, stride=1, padding=kernel // 2)
-            softened[name] = m.squeeze(0).squeeze(0).to(device=mask.device, dtype=mask.dtype).clamp(0.0, 1.0)
+            original = mask.float()
+            blurred = F.avg_pool2d(
+                original.unsqueeze(0).unsqueeze(0),
+                kernel_size=kernel,
+                stride=1,
+                padding=kernel // 2,
+            ).squeeze(0).squeeze(0)
+            m = ((original * 0.75) + (blurred * 0.25)).clamp(0.0, 1.0)
+            m = torch.where(m < 0.08, torch.zeros_like(m), m)
+            softened[name] = m.to(device=mask.device, dtype=mask.dtype)
 
         if concept_names:
             concept_masks = [

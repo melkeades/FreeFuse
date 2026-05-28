@@ -110,7 +110,10 @@
   },
   "8": {
     "inputs": {
-      "prompt": "Cinematic editorial portrait of arden_qwen, a tall explorer wearing a cobalt field jacket with silver pins, standing beside mila_qwen, a cheerful engineer in a saffron raincoat with braided hair, in a rain-washed neon market street at night, rich fabric texture, detailed natural light",
+      "prompt": [
+        "27",
+        0
+      ],
       "filter_meaningless": true,
       "filter_single_char": true,
       "clip": [
@@ -118,8 +121,8 @@
         1
       ],
       "freefuse_data": [
-        "7",
-        0
+        "27",
+        1
       ]
     },
     "class_type": "FreeFuseTokenPositions",
@@ -127,9 +130,29 @@
       "title": "Compute Qwen Token Positions"
     }
   },
+  "27": {
+    "inputs": {
+      "prompt_prefix": "Cinematic editorial portrait of",
+      "concept_joiner": ", standing beside ",
+      "include_background": true,
+      "background_joiner": " in ",
+      "prompt_suffix": "rich fabric texture, detailed natural light",
+      "freefuse_data": [
+        "7",
+        0
+      ]
+    },
+    "class_type": "FreeFusePromptComposer",
+    "_meta": {
+      "title": "Compose Positive Prompt"
+    }
+  },
   "9": {
     "inputs": {
-      "text": "Cinematic editorial portrait of arden_qwen, a tall explorer wearing a cobalt field jacket with silver pins, standing beside mila_qwen, a cheerful engineer in a saffron raincoat with braided hair, in a rain-washed neon market street at night, rich fabric texture, detailed natural light",
+      "text": [
+        "27",
+        0
+      ],
       "clip": [
         "6",
         1

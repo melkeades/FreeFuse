@@ -63,6 +63,7 @@ from freefuse_comfyui.freefuse_core.attention_bias_patch import (  # noqa: E402
 from freefuse_comfyui.freefuse_core.bypass_lora_loader import (  # noqa: E402
     MultiAdapterBypassForwardHook,
 )
+from freefuse_comfyui.nodes.concept_map import FreeFusePromptComposer  # noqa: E402
 
 
 IM_START = 151644
@@ -181,6 +182,40 @@ def test_qwen_image_background_positions():
     )
     assert explicit == [3]
     assert automatic == []
+
+
+def test_prompt_composer_keeps_concepts_verbatim():
+    composer = FreeFusePromptComposer()
+    data = {
+        "concepts": {
+            "arden": "arden_qwen, a tall explorer",
+            "mila": "mila_qwen, a cheerful engineer",
+        },
+        "settings": {
+            "enable_background": True,
+            "background_text": "one continuous rain-washed neon market street",
+        },
+    }
+
+    prompt, out_data = composer.compose_prompt(
+        freefuse_data=data,
+        prompt_prefix="Cinematic portrait of",
+        concept_joiner=" and ",
+        include_background=True,
+        background_joiner=" in ",
+        prompt_suffix="same camera and lighting",
+    )
+
+    assert prompt == (
+        "Cinematic portrait of arden_qwen, a tall explorer and "
+        "mila_qwen, a cheerful engineer in one continuous rain-washed neon market street, "
+        "same camera and lighting"
+    )
+    assert data["concepts"]["arden"] in prompt
+    assert data["concepts"]["mila"] in prompt
+    assert data["settings"]["background_text"] in prompt
+    assert out_data["prompt"] == prompt
+    assert out_data["concepts"] == data["concepts"]
 
 
 class DummyModule(nn.Module):

@@ -1809,9 +1809,9 @@ def _normalize_spatial_scores(scores: torch.Tensor) -> torch.Tensor:
 
 def _focus_spatial_scores(
     scores: torch.Tensor,
-    low_q: float = 0.42,
+    low_q: float = 0.34,
     high_q: float = 0.96,
-    gamma: float = 1.35,
+    gamma: float = 1.2,
 ) -> torch.Tensor:
     """
     Keep high-confidence Qwen regions while suppressing broad low-confidence tails.
@@ -1831,6 +1831,49 @@ def _focus_spatial_scores(
     focused = ((scores_f - low) / (high - low + 1e-6)).clamp(0.0, 1.0)
     focused = focused.pow(gamma)
     return focused.to(dtype=scores.dtype)
+
+
+def _combine_qwen_token_maps_by_locality(token_maps: torch.Tensor, img_len: int) -> torch.Tensor:
+    """
+    Combine per-token Qwen text->image maps while suppressing global style tokens.
+
+    Activation strings such as "80s Fantasy Movie Still" are needed to trigger a
+    LoRA, but their attention is often broad/global rather than subject-local.
+    Treating those tokens like noun tokens shrinks the actual character masks and
+    lets background/style channels bleed. Weighting tokens by spatial contrast
+    keeps localized subject words dominant without requiring trigger-word lists.
+    """
+    if token_maps.dim() != 3:
+        return token_maps
+
+    bsz, token_count, seq_len = token_maps.shape
+    if token_count <= 1:
+        return _normalize_spatial_scores(
+            _smooth_spatial_scores(token_maps.squeeze(1), img_len)
+        )
+
+    maps_f = token_maps.float().reshape(bsz * token_count, seq_len)
+    smoothed = _smooth_spatial_scores(maps_f, img_len).view(bsz, token_count, seq_len)
+
+    mean = smoothed.mean(dim=-1)
+    median = torch.quantile(smoothed, 0.50, dim=-1)
+    peak = torch.quantile(smoothed, 0.99, dim=-1)
+    locality = ((peak - torch.maximum(mean, median)) / (mean + 1e-8)).clamp_min(0.0)
+
+    max_locality = locality.max(dim=1, keepdim=True)[0]
+    localized = torch.where(
+        locality >= (max_locality * 0.30),
+        locality,
+        torch.zeros_like(locality),
+    )
+    weight_sum = localized.sum(dim=1, keepdim=True)
+
+    norm_maps = _normalize_spatial_scores(smoothed.reshape(bsz * token_count, seq_len))
+    norm_maps = norm_maps.view(bsz, token_count, seq_len)
+    weighted = (norm_maps * (localized / (weight_sum + 1e-8)).unsqueeze(-1)).sum(dim=1)
+    fallback = norm_maps.mean(dim=1)
+    scores = torch.where(weight_sum > 1e-8, weighted, fallback)
+    return _normalize_spatial_scores(scores).to(dtype=token_maps.dtype)
 
 
 def _qwen_order_prior(
@@ -1908,9 +1951,8 @@ def compute_qwen_image_similarity_maps_with_qkv(
         # Text concept queries attend over all image keys.
         weights = torch.einsum("bjhd,bihd->bhji", concept_q, img_k) * scale
         weights = F.softmax(weights.float(), dim=-1).to(dtype)
-        scores = weights.mean(dim=1).mean(dim=1)  # (B, img_len)
-        scores = _smooth_spatial_scores(scores, img_len)
-        scores = _normalize_spatial_scores(scores)
+        token_maps = weights.mean(dim=1)  # (B, concept_len, img_len)
+        scores = _combine_qwen_token_maps_by_locality(token_maps, img_len)
         all_scores[name] = scores
 
     concept_count = len(all_scores)
@@ -1962,7 +2004,7 @@ def compute_qwen_image_similarity_maps_with_qkv(
         bg_scores = bg_weights.mean(dim=1).mean(dim=1)
         bg_scores = _normalize_spatial_scores(_smooth_spatial_scores(bg_scores, img_len))
         if inverse_background is not None:
-            bg_scores = _normalize_spatial_scores((bg_scores * 0.35) + (inverse_background * 0.65))
+            bg_scores = _normalize_spatial_scores((bg_scores * 0.55) + (inverse_background * 0.45))
         concept_sim_maps[bg_key] = bg_scores.unsqueeze(-1)
         break
 

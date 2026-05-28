@@ -19,6 +19,7 @@ from .lora_loader import (
 )
 from .concept_map import (
     FreeFuseConceptMap,
+    FreeFusePromptComposer,
     FreeFuseTokenPositions,
     FreeFuseConceptMapSimple,
 )
@@ -46,6 +47,7 @@ NODE_CLASS_MAPPINGS = {
     "FreeFuseLoRALoader": FreeFuseLoRALoader,
     "FreeFuseLoRALoaderSimple": FreeFuseLoRALoaderSimple,
     "FreeFuseConceptMap": FreeFuseConceptMap,
+    "FreeFusePromptComposer": FreeFusePromptComposer,
     "FreeFuseTokenPositions": FreeFuseTokenPositions,
     "FreeFuseConceptMapSimple": FreeFuseConceptMapSimple,
     "FreeFusePhase1Sampler": FreeFusePhase1Sampler,
@@ -63,6 +65,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "FreeFuseLoRALoader": "FreeFuse LoRA Loader (Bypass)",
     "FreeFuseLoRALoaderSimple": "FreeFuse LoRA Loader (Simple)",
     "FreeFuseConceptMap": "FreeFuse Concept Map",
+    "FreeFusePromptComposer": "FreeFuse Prompt Composer",
     "FreeFuseTokenPositions": "FreeFuse Token Positions",
     "FreeFuseConceptMapSimple": "FreeFuse Concept Map (Simple)",
     "FreeFusePhase1Sampler": "FreeFuse Phase 1 Sampler",
@@ -82,6 +85,7 @@ __all__ = [
     "FreeFuseLoRALoaderSimple",
     # Concept mapping
     "FreeFuseConceptMap",
+    "FreeFusePromptComposer",
     "FreeFuseTokenPositions",
     "FreeFuseConceptMapSimple",
     # Sampling

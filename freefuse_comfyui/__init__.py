@@ -25,6 +25,7 @@ from .nodes import (
     FreeFuseLoRALoaderSimple,
     # Concept mapping
     FreeFuseConceptMap,
+    FreeFusePromptComposer,
     FreeFuseTokenPositions,
     FreeFuseConceptMapSimple,
     # Sampling
