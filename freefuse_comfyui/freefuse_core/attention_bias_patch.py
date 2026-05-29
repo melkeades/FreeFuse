@@ -1056,13 +1056,14 @@ class FreeFuseQwenImageBiasBlockReplace:
         config: AttentionBiasConfig,
         block_index: int,
         block=None,
+        bias_cache: Optional[Dict[Tuple[int, int], Optional[torch.Tensor]]] = None,
     ):
         self.lora_masks = lora_masks
         self.token_pos_maps = token_pos_maps
         self.config = config
         self.block_index = block_index
         self.block = block
-        self._bias_cache = {}
+        self._bias_cache = bias_cache if bias_cache is not None else {}
 
     def _get_or_build_bias(
         self,
@@ -1590,6 +1591,7 @@ def _apply_qwen_image_bias_patches(
         return
 
     qwen_config = _resolve_qwen_image_bias_config(config, num_layers)
+    shared_bias_cache: Dict[Tuple[int, int], Optional[torch.Tensor]] = {}
 
     patches_applied = 0
     for i in range(num_layers):
@@ -1602,6 +1604,7 @@ def _apply_qwen_image_bias_patches(
                 config=qwen_config,
                 block_index=i,
                 block=block,
+                bias_cache=shared_bias_cache,
             )
             model_patcher.set_model_patch_replace(
                 replacer.create_block_replace(),

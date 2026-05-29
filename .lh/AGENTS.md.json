@@ -3,11 +3,31 @@
     "activeCommit": 0,
     "commits": [
         {
-            "activePatchIndex": 0,
+            "activePatchIndex": 5,
             "patches": [
                 {
                     "date": 1779986233644,
                     "content": "Index: \n===================================================================\n--- \n+++ \n"
+                },
+                {
+                    "date": 1780055811235,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,1 +1,2 @@\n-Do NOT change LoRAs and the 4-step lightning setup in workflow!\r\n+Do not change LoRAs.\r\n+Do not revert to qwen 50 steps workflow, keep it 4 steps.\r\n"
+                },
+                {
+                    "date": 1780055869235,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,2 +1,3 @@\n Do not change LoRAs.\r\n Do not revert to qwen 50 steps workflow, keep it 4 steps.\r\n+Use Comfyui python H:\\cg-git\\comfy-port\\python_embeded\r\n"
+                },
+                {
+                    "date": 1780055998825,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,3 +1,4 @@\n Do not change LoRAs.\r\n Do not revert to qwen 50 steps workflow, keep it 4 steps.\r\n Use Comfyui python H:\\cg-git\\comfy-port\\python_embeded\r\n+Monitor the shared gpu memory, if vram is full and shared memory starts rising it is bad code, fix.\r\n"
+                },
+                {
+                    "date": 1780056027468,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,4 +1,5 @@\n Do not change LoRAs.\r\n Do not revert to qwen 50 steps workflow, keep it 4 steps.\r\n Use Comfyui python H:\\cg-git\\comfy-port\\python_embeded\r\n Monitor the shared gpu memory, if vram is full and shared memory starts rising it is bad code, fix.\r\n+Always check the final image quality and adherence to the prompt. \r\n"
+                },
+                {
+                    "date": 1780056043325,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,5 +1,5 @@\n Do not change LoRAs.\r\n Do not revert to qwen 50 steps workflow, keep it 4 steps.\r\n Use Comfyui python H:\\cg-git\\comfy-port\\python_embeded\r\n Monitor the shared gpu memory, if vram is full and shared memory starts rising it is bad code, fix.\r\n-Always check the final image quality and adherence to the prompt. \n\\ No newline at end of file\n+Always check the final image quality and adherence to the prompt.\r\n"
                 }
             ],
             "date": 1779986233644,
