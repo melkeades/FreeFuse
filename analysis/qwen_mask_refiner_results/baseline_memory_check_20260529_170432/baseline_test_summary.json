@@ -1,0 +1,54 @@
+{
+  "prompt_id": "73138a5b-b03e-409a-b329-3d0d56d55be5",
+  "elapsed_seconds": 81.69671539998672,
+  "status": {
+    "status_str": "success",
+    "completed": true,
+    "messages": [
+      [
+        "execution_start",
+        {
+          "prompt_id": "73138a5b-b03e-409a-b329-3d0d56d55be5",
+          "timestamp": 1780063473514
+        }
+      ],
+      [
+        "execution_cached",
+        {
+          "nodes": [],
+          "prompt_id": "73138a5b-b03e-409a-b329-3d0d56d55be5",
+          "timestamp": 1780063473523
+        }
+      ],
+      [
+        "execution_success",
+        {
+          "prompt_id": "73138a5b-b03e-409a-b329-3d0d56d55be5",
+          "timestamp": 1780063554685
+        }
+      ]
+    ]
+  },
+  "memory": {
+    "samples": 56,
+    "gpu0_used_peak_mb": 32168.0,
+    "gpu0_free_min_mb": 23.0,
+    "process_shared_peak_mb": 536.0,
+    "process_nonlocal_peak_mb": 536.0,
+    "process_dedicated_peak_mb": 32168.578125,
+    "process_local_peak_mb": 32072.578125
+  },
+  "outputs": {
+    "91": [
+      "H:\\cg-git\\comfy-port\\ComfyUI\\output\\FreeFuse\\qwen_image_2512_baseline_memory_check\\phase1_detailed_masks_00001_.png"
+    ],
+    "90": [
+      "H:\\cg-git\\comfy-port\\ComfyUI\\output\\FreeFuse\\qwen_image_2512_baseline_memory_check\\phase1_mask_preview_00001_.png"
+    ],
+    "18": [
+      "H:\\cg-git\\comfy-port\\ComfyUI\\output\\FreeFuse\\qwen_image_2512_baseline_memory_check\\final_00001_.png"
+    ]
+  },
+  "memory_samples_path": "H:\\cg-git\\comfy-port\\ComfyUI\\custom_nodes\\freefuse\\analysis\\qwen_mask_refiner_results\\baseline_memory_check_20260529_170432\\baseline_qwen_4step_tiled_memory_samples.json",
+  "prompt_path": "H:\\cg-git\\comfy-port\\ComfyUI\\custom_nodes\\freefuse\\analysis\\qwen_mask_refiner_results\\baseline_memory_check_20260529_170432\\baseline_qwen_4step_tiled_prompt.json"
+}

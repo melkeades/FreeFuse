@@ -1,0 +1,205 @@
+{
+  "timestamp": "20260529_155932",
+  "workflow": "H:\\cg-git\\comfy-port\\ComfyUI\\custom_nodes\\freefuse\\freefuse_comfyui\\workflows\\qwen_image_2512_freefuse_complete.json",
+  "qwen_steps": 4,
+  "phase1_seed": 42,
+  "phase2_seed": 327228017462953,
+  "preview_input_name": "freefuse_experiment/20260529_155932_final_00001_.png",
+  "runs": {
+    "direct_phase1": {
+      "prompt_id": "51134046-3a70-4747-8bec-35f1d35fb211",
+      "elapsed_seconds": 74.5649037000112,
+      "status": {
+        "status_str": "error",
+        "completed": false,
+        "messages": [
+          [
+            "execution_start",
+            {
+              "prompt_id": "51134046-3a70-4747-8bec-35f1d35fb211",
+              "timestamp": 1780059574059
+            }
+          ],
+          [
+            "execution_cached",
+            {
+              "nodes": [],
+              "prompt_id": "51134046-3a70-4747-8bec-35f1d35fb211",
+              "timestamp": 1780059574059
+            }
+          ],
+          [
+            "execution_error",
+            {
+              "prompt_id": "51134046-3a70-4747-8bec-35f1d35fb211",
+              "node_id": "29",
+              "node_type": "VAEDecode",
+              "executed": [
+                "4",
+                "28",
+                "5",
+                "2",
+                "3",
+                "8",
+                "1",
+                "11",
+                "90",
+                "6",
+                "19",
+                "7",
+                "9",
+                "12",
+                "10"
+              ],
+              "exception_message": "tuple index out of range\n",
+              "exception_type": "IndexError",
+              "traceback": [
+                "  File \"H:\\cg-git\\comfy-port\\ComfyUI\\execution.py\", line 536, in execute\n    output_data, output_ui, has_subgraph, has_pending_tasks = await get_output_data(prompt_id, unique_id, obj, input_data_all, execution_block_cb=execution_block_cb, pre_execute_cb=pre_execute_cb, v3_data=v3_data)\n                                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n",
+                "  File \"H:\\cg-git\\comfy-port\\ComfyUI\\execution.py\", line 336, in get_output_data\n    return_values = await _async_map_node_over_list(prompt_id, unique_id, obj, input_data_all, obj.FUNCTION, allow_interrupt=True, execution_block_cb=execution_block_cb, pre_execute_cb=pre_execute_cb, v3_data=v3_data)\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n",
+                "  File \"H:\\cg-git\\comfy-port\\ComfyUI\\custom_nodes\\comfyui-lora-manager\\py\\metadata_collector\\metadata_hook.py\", line 165, in async_map_node_over_list_with_metadata\n    results = await original_map_node_over_list(\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n",
+                "  File \"H:\\cg-git\\comfy-port\\ComfyUI\\execution.py\", line 310, in _async_map_node_over_list\n    await process_inputs(input_dict, i)\n",
+                "  File \"H:\\cg-git\\comfy-port\\ComfyUI\\execution.py\", line 298, in process_inputs\n    result = f(**inputs)\n             ^^^^^^^^^^^\n",
+                "  File \"H:\\cg-git\\comfy-port\\ComfyUI\\nodes.py\", line 316, in decode\n    images = vae.decode(latent)\n             ^^^^^^^^^^^^^^^^^^\n",
+                "  File \"H:\\cg-git\\comfy-port\\ComfyUI\\comfy\\sd.py\", line 1054, in decode\n    model_management.raise_non_oom(e)\n",
+                "  File \"H:\\cg-git\\comfy-port\\ComfyUI\\comfy\\model_management.py\", line 287, in raise_non_oom\n    raise e\n",
+                "  File \"H:\\cg-git\\comfy-port\\ComfyUI\\comfy\\sd.py\", line 1030, in decode\n    memory_used = self.memory_used_decode(samples_in.shape, self.vae_dtype)\n                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n",
+                "  File \"H:\\cg-git\\comfy-port\\ComfyUI\\comfy\\sd.py\", line 743, in <lambda>\n    self.memory_used_decode = lambda shape, dtype: (2200 if shape[2]<=4 else 7000) * shape[3] * shape[4] * (8*8) * model_management.dtype_size(dtype)\n                                                                                                ~~~~~^^^\n"
+              ],
+              "current_inputs": {
+                "samples": [
+                  "{'samples': tensor([[[[ 0.1967,  0.2018,  0.2286,  ...,  0.2419,  0.2395,  0.2373],\n          [ 0.2303,  0.1761,  0.2608,  ...,  0.1559,  0.1978,  0.2421],\n          [ 0.1319,  0.1080,  0.1017,  ...,  0.1895,  0.1451,  0.2074],\n          ...,\n          [ 0.3293,  0.2141,  0.3012,  ..., -0.0911, -0.0233,  0.1758],\n          [ 0.1591,  0.2085,  0.2636,  ..., -0.0534, -0.1686, -0.0982],\n          [ 0.3509,  0.2704,  0.3065,  ...,  0.0179, -0.0461, -0.0036]],\n\n         [[ 0.2823,  0.3254,  0.3947,  ...,  0.3730,  0.4473,  0.3691],\n          [ 0.2785,  0.3107,  0.4066,  ...,  0.3160,  0.3546,  0.2709],\n          [ 0.2181,  0.3230,  0.3064,  ...,  0.2870,  0.2871,  0.3798],\n          ...,\n          [ 0.4000,  0.4373,  0.1324,  ...,  0.9200,  0.8025,  0.5779],\n          [ 0.3021,  0.5270,  0.3096,  ...,  0.7703,  0.8507,  0.9352],\n          [ 0.3723,  0.3256,  0.4737,  ...,  0.8521,  1.0486,  0.8758]],\n\n         [[-0.5385, -0.5592, -0.5613,  ..., -0.7241, -0.5493, -0.4939],\n          [-0.5515, -0.5478, -0.5927,  ..., -0.7767, -0.6192, -0.4598],\n          [-0.5410, -0.5433, -0.6075,  ..., -0.7773, -0.5623, -0.4273],\n          ...,\n          [-0.6153, -0.7526, -0.4703,  ...,  0.2947,  0.0931, -0.3246],\n          [-0.6410, -0.6427, -0.6739,  ...,  0.3403,  0.2145,  0.0600],\n          [-0.5939, -0.7688, -0.6848,  ..., -0.2683,  0.6286,  0.4970]],\n\n         ...,\n\n         [[ 0.2574, -0.0199,  0.1463,  ...,  0.2929,  0.2496, -0.1379],\n          [ 0.2349, -0.1039,  0.2096,  ...,  0.3145,  0.2331, -0.2980],\n          [ 0.2281, -0.1604,  0.1180,  ...,  0.2277,  0.1343, -0.1903],\n          ...,\n          [ 0.2580, -0.1455, -0.5090,  ..., -0.0387, -0.3679, -0.1819],\n          [ 0.2644,  0.1198,  0.0214,  ..., -0.0245, -0.1231, -0.2601],\n          [ 0.2314,  0.2052,  0.0944,  ...,  0.3125, -0.0662, -0.6159]],\n\n         [[-0.3722, -0.4947, -0.3321,  ..., -0.3842, -0.2371, -0.4604],\n          [-0.3970, -0.5584, -0.4625,  ..., -0.3978, -0.5254, -0.4417],\n          [-0.4802, -0.5130, -0.5272,  ..., -0.4418, -0.4236, -0.3971],\n          ...,\n          [-0.2886, -0.3198, -0.2983,  ..., -0.1528, -0.2910, -0.3953],\n          [-0.3287, -0.3579, -0.2206,  ..., -0.1934, -0.1691, -0.2669],\n          [-0.3658, -0.2718, -0.3569,  ..., -0.1545, -0.1147,  0.1177]],\n\n         [[-0.2633, -0.2120, -0.4849,  ..., -0.5070, -0.2756, -0.3136],\n          [-0.3341, -0.3609, -0.4996,  ..., -0.6059, -0.2774, -0.4143],\n          [-0.4095, -0.2969, -0.5112,  ..., -0.5379, -0.4139, -0.4958],\n          ...,\n          [-0.3036, -0.3393,  0.1530,  ...,  0.2260,  0.0561, -0.4229],\n          [-0.3454, -0.3465, -0.1853,  ...,  0.0636,  0.1276,  0.3172],\n          [-0.1632, -0.3610, -0.3015,  ...,  0.0680,  0.2728,  0.0572]]]], device='cuda:0'), 'downscale_ratio_spacial': 8}"
+                ],
+                "vae": [
+                  "<comfy.sd.VAE object at 0x0000023DD624E1B0>"
+                ]
+              },
+              "current_outputs": [],
+              "timestamp": 1780059648065
+            }
+          ]
+        ]
+      },
+      "memory": {
+        "samples": 66,
+        "gpu0_used_peak_mb": 28482.0,
+        "gpu0_free_min_mb": 3709.0,
+        "process_shared_peak_mb": 0.0,
+        "process_nonlocal_peak_mb": 0.0,
+        "process_dedicated_peak_mb": 0.0,
+        "process_local_peak_mb": 0.0
+      },
+      "outputs": {
+        "90": [
+          "H:\\cg-git\\comfy-port\\ComfyUI\\output\\FreeFuse\\experiments\\20260529_155932\\direct_phase1\\phase1_mask_preview_00001_.png"
+        ]
+      },
+      "memory_samples_path": "H:\\cg-git\\comfy-port\\ComfyUI\\custom_nodes\\freefuse\\analysis\\qwen_mask_refiner_results\\20260529_155932\\direct_phase1_memory_samples.json",
+      "prompt_path": "H:\\cg-git\\comfy-port\\ComfyUI\\custom_nodes\\freefuse\\analysis\\qwen_mask_refiner_results\\20260529_155932\\direct_phase1_prompt.json"
+    },
+    "cheap_preview_source": {
+      "prompt_id": "bd10e553-3751-4a87-b43e-68f4ccbf1465",
+      "elapsed_seconds": 85.67358580000291,
+      "status": {
+        "status_str": "success",
+        "completed": true,
+        "messages": [
+          [
+            "execution_start",
+            {
+              "prompt_id": "bd10e553-3751-4a87-b43e-68f4ccbf1465",
+              "timestamp": 1780059649781
+            }
+          ],
+          [
+            "execution_cached",
+            {
+              "nodes": [],
+              "prompt_id": "bd10e553-3751-4a87-b43e-68f4ccbf1465",
+              "timestamp": 1780059649782
+            }
+          ],
+          [
+            "execution_success",
+            {
+              "prompt_id": "bd10e553-3751-4a87-b43e-68f4ccbf1465",
+              "timestamp": 1780059734937
+            }
+          ]
+        ]
+      },
+      "memory": {
+        "samples": 76,
+        "gpu0_used_peak_mb": 28484.0,
+        "gpu0_free_min_mb": 3707.0,
+        "process_shared_peak_mb": 0.0,
+        "process_nonlocal_peak_mb": 0.0,
+        "process_dedicated_peak_mb": 0.0,
+        "process_local_peak_mb": 0.0
+      },
+      "outputs": {
+        "90": [
+          "H:\\cg-git\\comfy-port\\ComfyUI\\output\\FreeFuse\\experiments\\20260529_155932\\cheap_preview_source\\phase1_mask_preview_00001_.png"
+        ],
+        "91": [
+          "H:\\cg-git\\comfy-port\\ComfyUI\\output\\FreeFuse\\experiments\\20260529_155932\\cheap_preview_source\\phase1_detailed_masks_00001_.png"
+        ],
+        "18": [
+          "H:\\cg-git\\comfy-port\\ComfyUI\\output\\FreeFuse\\experiments\\20260529_155932\\cheap_preview_source\\final_00001_.png"
+        ]
+      },
+      "memory_samples_path": "H:\\cg-git\\comfy-port\\ComfyUI\\custom_nodes\\freefuse\\analysis\\qwen_mask_refiner_results\\20260529_155932\\cheap_preview_source_memory_samples.json",
+      "prompt_path": "H:\\cg-git\\comfy-port\\ComfyUI\\custom_nodes\\freefuse\\analysis\\qwen_mask_refiner_results\\20260529_155932\\cheap_preview_source_prompt.json"
+    },
+    "cheap_preview_refined": {
+      "prompt_id": "50cd3164-6050-40ab-8d94-7314f88bbe7e",
+      "elapsed_seconds": 72.69023179999203,
+      "status": {
+        "status_str": "success",
+        "completed": true,
+        "messages": [
+          [
+            "execution_start",
+            {
+              "prompt_id": "50cd3164-6050-40ab-8d94-7314f88bbe7e",
+              "timestamp": 1780059736120
+            }
+          ],
+          [
+            "execution_cached",
+            {
+              "nodes": [],
+              "prompt_id": "50cd3164-6050-40ab-8d94-7314f88bbe7e",
+              "timestamp": 1780059736121
+            }
+          ],
+          [
+            "execution_success",
+            {
+              "prompt_id": "50cd3164-6050-40ab-8d94-7314f88bbe7e",
+              "timestamp": 1780059808103
+            }
+          ]
+        ]
+      },
+      "memory": {
+        "samples": 65,
+        "gpu0_used_peak_mb": 28582.0,
+        "gpu0_free_min_mb": 3609.0,
+        "process_shared_peak_mb": 0.0,
+        "process_nonlocal_peak_mb": 0.0,
+        "process_dedicated_peak_mb": 0.0,
+        "process_local_peak_mb": 0.0
+      },
+      "outputs": {
+        "91": [
+          "H:\\cg-git\\comfy-port\\ComfyUI\\output\\FreeFuse\\experiments\\20260529_155932\\cheap_preview_refined\\cheap_preview_loaded_00001_.png"
+        ],
+        "90": [
+          "H:\\cg-git\\comfy-port\\ComfyUI\\output\\FreeFuse\\experiments\\20260529_155932\\cheap_preview_refined\\phase1_mask_preview_00001_.png"
+        ]
+      },
+      "memory_samples_path": "H:\\cg-git\\comfy-port\\ComfyUI\\custom_nodes\\freefuse\\analysis\\qwen_mask_refiner_results\\20260529_155932\\cheap_preview_refined_memory_samples.json",
+      "prompt_path": "H:\\cg-git\\comfy-port\\ComfyUI\\custom_nodes\\freefuse\\analysis\\qwen_mask_refiner_results\\20260529_155932\\cheap_preview_refined_prompt.json"
+    }
+  }
+}

@@ -41,6 +41,11 @@ from .mask_tap import (
     FreeFuseMaskTap,
     FreeFuseMaskReassemble,
 )
+from .mask_refiner import (
+    FreeFuseSAMMaskRefiner,
+    NODE_CLASS_MAPPINGS as REFINER_NODE_MAPPINGS,
+    NODE_DISPLAY_NAME_MAPPINGS as REFINER_DISPLAY_MAPPINGS,
+)
 
 # Combine all node mappings
 NODE_CLASS_MAPPINGS = {
@@ -56,10 +61,12 @@ NODE_CLASS_MAPPINGS = {
     "FreeFuseMaskDebug": FreeFuseMaskDebug,
     "FreeFuseMaskTap": FreeFuseMaskTap,
     "FreeFuseMaskReassemble": FreeFuseMaskReassemble,
+    "FreeFuseSAMMaskRefiner": FreeFuseSAMMaskRefiner,
     # Attention bias nodes
     "FreeFuseAttentionBias": FreeFuseAttentionBias,
     "FreeFuseAttentionBiasVisualize": FreeFuseAttentionBiasVisualize,
 }
+NODE_CLASS_MAPPINGS.update(REFINER_NODE_MAPPINGS)
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "FreeFuseLoRALoader": "FreeFuse LoRA Loader (Bypass)",
@@ -74,10 +81,12 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "FreeFuseMaskDebug": "FreeFuse Mask Debug",
     "FreeFuseMaskTap": "FreeFuse Mask Tap",
     "FreeFuseMaskReassemble": "FreeFuse Mask Reassemble",
+    "FreeFuseSAMMaskRefiner": "FreeFuse SAM Mask Refiner",
     # Attention bias nodes
     "FreeFuseAttentionBias": "FreeFuse Attention Bias",
     "FreeFuseAttentionBiasVisualize": "FreeFuse Attention Bias Visualize",
 }
+NODE_DISPLAY_NAME_MAPPINGS.update(REFINER_DISPLAY_MAPPINGS)
 
 __all__ = [
     # LoRA loaders
@@ -95,6 +104,7 @@ __all__ = [
     "FreeFuseMaskDebug",
     "FreeFuseMaskTap",
     "FreeFuseMaskReassemble",
+    "FreeFuseSAMMaskRefiner",
     # Attention bias
     "FreeFuseAttentionBias",
     "FreeFuseAttentionBiasVisualize",

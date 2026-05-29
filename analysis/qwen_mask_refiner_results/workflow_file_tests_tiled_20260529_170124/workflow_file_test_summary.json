@@ -1,0 +1,132 @@
+{
+  "phase1_preview_refine_file_tiled": {
+    "workflow_file": "H:\\cg-git\\comfy-port\\ComfyUI\\custom_nodes\\freefuse\\freefuse_comfyui\\workflows\\qwen_image_2512_freefuse_phase1_preview_refine.json",
+    "elapsed_seconds": 99.31096909999906,
+    "status": {
+      "status_str": "success",
+      "completed": true,
+      "messages": [
+        [
+          "execution_start",
+          {
+            "prompt_id": "ca6aa56d-8be9-4d71-a507-20b88fac47aa",
+            "timestamp": 1780063285306
+          }
+        ],
+        [
+          "execution_cached",
+          {
+            "nodes": [],
+            "prompt_id": "ca6aa56d-8be9-4d71-a507-20b88fac47aa",
+            "timestamp": 1780063285319
+          }
+        ],
+        [
+          "execution_success",
+          {
+            "prompt_id": "ca6aa56d-8be9-4d71-a507-20b88fac47aa",
+            "timestamp": 1780063384089
+          }
+        ]
+      ]
+    },
+    "outputs": {
+      "90": [
+        "H:\\cg-git\\comfy-port\\ComfyUI\\output\\FreeFuse\\qwen_image_2512_phase1_preview_refine\\phase1_mask_preview_00003_.png"
+      ],
+      "91": [
+        "H:\\cg-git\\comfy-port\\ComfyUI\\output\\FreeFuse\\qwen_image_2512_phase1_preview_refine\\phase1_preview_decode_00003_.png"
+      ],
+      "92": [
+        "H:\\cg-git\\comfy-port\\ComfyUI\\output\\FreeFuse\\qwen_image_2512_phase1_preview_refine\\refined_overlay_00003_.png"
+      ],
+      "93": [
+        "H:\\cg-git\\comfy-port\\ComfyUI\\output\\FreeFuse\\qwen_image_2512_phase1_preview_refine\\refined_individual_masks_00005_.png",
+        "H:\\cg-git\\comfy-port\\ComfyUI\\output\\FreeFuse\\qwen_image_2512_phase1_preview_refine\\refined_individual_masks_00006_.png"
+      ],
+      "94": [
+        "H:\\cg-git\\comfy-port\\ComfyUI\\output\\FreeFuse\\qwen_image_2512_phase1_preview_refine\\refined_detailed_masks_00003_.png"
+      ],
+      "18": [
+        "H:\\cg-git\\comfy-port\\ComfyUI\\output\\FreeFuse\\qwen_image_2512_phase1_preview_refine\\final_00003_.png"
+      ]
+    },
+    "memory": {
+      "samples": 68,
+      "gpu0_used_peak_mb": 31944.0,
+      "gpu0_free_min_mb": 247.0,
+      "process_shared_peak_mb": 408.0,
+      "process_nonlocal_peak_mb": 408.0,
+      "process_dedicated_peak_mb": 32168.578125,
+      "process_local_peak_mb": 32168.578125
+    }
+  },
+  "cheap_preview_refine_file_tiled": {
+    "workflow_file": "H:\\cg-git\\comfy-port\\ComfyUI\\custom_nodes\\freefuse\\freefuse_comfyui\\workflows\\qwen_image_2512_freefuse_cheap_preview_refine.json",
+    "elapsed_seconds": 66.48483729999862,
+    "status": {
+      "status_str": "success",
+      "completed": true,
+      "messages": [
+        [
+          "execution_start",
+          {
+            "prompt_id": "028c3776-24a7-4e54-a151-6db616cae424",
+            "timestamp": 1780063385340
+          }
+        ],
+        [
+          "execution_cached",
+          {
+            "nodes": [
+              "1",
+              "2",
+              "3",
+              "4",
+              "5",
+              "7",
+              "19",
+              "28"
+            ],
+            "prompt_id": "028c3776-24a7-4e54-a151-6db616cae424",
+            "timestamp": 1780063385355
+          }
+        ],
+        [
+          "execution_success",
+          {
+            "prompt_id": "028c3776-24a7-4e54-a151-6db616cae424",
+            "timestamp": 1780063450883
+          }
+        ]
+      ]
+    },
+    "outputs": {
+      "36": [
+        "H:\\cg-git\\comfy-port\\ComfyUI\\output\\FreeFuse\\qwen_image_2512_cheap_preview_refine\\phase1_mask_preview_00003_.png"
+      ],
+      "18": [
+        "H:\\cg-git\\comfy-port\\ComfyUI\\output\\FreeFuse\\qwen_image_2512_cheap_preview_refine\\cheap_preview_source_00003_.png"
+      ],
+      "35": [
+        "H:\\cg-git\\comfy-port\\ComfyUI\\output\\FreeFuse\\qwen_image_2512_cheap_preview_refine\\refined_individual_masks_00005_.png",
+        "H:\\cg-git\\comfy-port\\ComfyUI\\output\\FreeFuse\\qwen_image_2512_cheap_preview_refine\\refined_individual_masks_00006_.png"
+      ],
+      "34": [
+        "H:\\cg-git\\comfy-port\\ComfyUI\\output\\FreeFuse\\qwen_image_2512_cheap_preview_refine\\refined_overlay_00003_.png"
+      ],
+      "33": [
+        "H:\\cg-git\\comfy-port\\ComfyUI\\output\\FreeFuse\\qwen_image_2512_cheap_preview_refine\\final_00003_.png"
+      ]
+    },
+    "memory": {
+      "samples": 45,
+      "gpu0_used_peak_mb": 32168.0,
+      "gpu0_free_min_mb": 23.0,
+      "process_shared_peak_mb": 344.0,
+      "process_nonlocal_peak_mb": 344.0,
+      "process_dedicated_peak_mb": 31944.1953125,
+      "process_local_peak_mb": 31944.1953125
+    }
+  }
+}

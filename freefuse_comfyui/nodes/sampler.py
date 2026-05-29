@@ -155,8 +155,8 @@ class FreeFusePhase1Sampler:
             }
         }
     
-    RETURN_TYPES = ("MODEL", "FREEFUSE_MASKS", "IMAGE")
-    RETURN_NAMES = ("model", "masks", "mask_preview")
+    RETURN_TYPES = ("MODEL", "FREEFUSE_MASKS", "IMAGE", "LATENT")
+    RETURN_NAMES = ("model", "masks", "mask_preview", "phase1_latent")
     FUNCTION = "collect_masks"
     CATEGORY = "FreeFuse"
     
@@ -222,7 +222,7 @@ for Phase 2 generation with the same seed and steps."""
             print("[FreeFuse] Warning: No concepts defined, returning empty masks")
             empty_masks = {}
             preview = torch.zeros(1, 64, 64, 3)
-            return (model, {"masks": empty_masks}, preview)
+            return (model, {"masks": empty_masks}, preview, self._clone_latent_for_output(latent))
         
         # Check if token positions are available
         if not token_pos_maps:
@@ -235,7 +235,7 @@ for Phase 2 generation with the same seed and steps."""
             
             masks = {name: torch.ones(latent_h, latent_w) for name in concepts}
             preview = self._create_preview(masks, img_w, img_h)
-            return (model, {"masks": masks}, preview)
+            return (model, {"masks": masks}, preview, self._clone_latent_for_output(latent))
         
         # Clone model to add attention hooks
         model_clone = model.clone()
@@ -369,6 +369,7 @@ for Phase 2 generation with the same seed and steps."""
                 "[FreeFuse] Qwen-Image Phase 1: expanded 4D latent to "
                 f"{tuple(sample_latent_image.shape)} for native Qwen transformer input"
             )
+        phase1_latent_holder = {"samples": None}
         batch_size = latent_image.shape[0]
         
         # Calculate image dimensions
@@ -465,6 +466,11 @@ for Phase 2 generation with the same seed and steps."""
         # Configure step callback to update current step and enable early stopping
         def step_callback(step, x0, x, total_steps):
             freefuse_state.current_step = step
+            if x0 is not None and step >= freefuse_state.collect_step:
+                phase1_latent_holder["samples"] = self._clone_latent_samples_for_output(
+                    x0,
+                    patch_model_type=patch_model_type,
+                )
             # Check if we've collected similarity maps and can stop early
             if step <= freefuse_state.collect_step or not freefuse_state.similarity_maps:
                 return
@@ -527,7 +533,7 @@ for Phase 2 generation with the same seed and steps."""
             # Return empty masks on error
             empty_masks = {name: torch.ones(latent_h, latent_w) for name in concepts}
             preview = self._create_preview(empty_masks, img_w, img_h)
-            return (model_clone, {"masks": empty_masks}, preview)
+            return (model_clone, {"masks": empty_masks}, preview, self._clone_latent_for_output(latent))
         
         # Get similarity maps directly from freefuse_state
         similarity_maps = freefuse_state.similarity_maps
@@ -712,11 +718,38 @@ for Phase 2 generation with the same seed and steps."""
                 "phase1_seed": phase1_seed,
             },
         }
+        phase1_samples = phase1_latent_holder.get("samples")
         return (
             model_clone,
             mask_bank,
-            preview
+            preview,
+            self._clone_latent_for_output(
+                latent,
+                samples=phase1_samples,
+                patch_model_type=patch_model_type,
+            ),
         )
+
+    @staticmethod
+    def _clone_latent_samples_for_output(samples, patch_model_type=None):
+        """Clone sampler callback samples into a standard LATENT sample tensor."""
+        if samples is None:
+            return None
+        out = samples.detach()
+        if patch_model_type == "qwen_image" and out.dim() == 4:
+            out = out.unsqueeze(2)
+        return out.clone()
+
+    @classmethod
+    def _clone_latent_for_output(cls, latent, samples=None, patch_model_type=None):
+        """Return a LATENT object suitable for decoding Phase 1 x0 previews."""
+        out = dict(latent) if isinstance(latent, dict) else {}
+        source = samples if samples is not None else out.get("samples")
+        cloned = cls._clone_latent_samples_for_output(source, patch_model_type=patch_model_type)
+        if cloned is None:
+            cloned = torch.zeros(1, 4, 8, 8)
+        out["samples"] = cloned
+        return out
 
     @staticmethod
     def _get_latent_downscale_ratio(model_patcher, fallback_ratio: int = 8) -> int:

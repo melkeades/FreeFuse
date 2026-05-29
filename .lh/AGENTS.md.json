@@ -3,7 +3,7 @@
     "activeCommit": 0,
     "commits": [
         {
-            "activePatchIndex": 5,
+            "activePatchIndex": 6,
             "patches": [
                 {
                     "date": 1779986233644,
@@ -28,6 +28,10 @@
                 {
                     "date": 1780056043325,
                     "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,5 +1,5 @@\n Do not change LoRAs.\r\n Do not revert to qwen 50 steps workflow, keep it 4 steps.\r\n Use Comfyui python H:\\cg-git\\comfy-port\\python_embeded\r\n Monitor the shared gpu memory, if vram is full and shared memory starts rising it is bad code, fix.\r\n-Always check the final image quality and adherence to the prompt. \n\\ No newline at end of file\n+Always check the final image quality and adherence to the prompt.\r\n"
+                },
+                {
+                    "date": 1780057900555,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -2,4 +2,5 @@\n Do not revert to qwen 50 steps workflow, keep it 4 steps.\r\n Use Comfyui python H:\\cg-git\\comfy-port\\python_embeded\r\n Monitor the shared gpu memory, if vram is full and shared memory starts rising it is bad code, fix.\r\n Always check the final image quality and adherence to the prompt.\r\n+Use the \\freefuse_comfyui\\workflows\\qwen_image_2512_freefuse_with_editor.json as the primary test workflow.\n\\ No newline at end of file\n"
                 }
             ],
             "date": 1779986233644,

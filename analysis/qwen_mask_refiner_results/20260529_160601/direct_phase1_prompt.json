@@ -1,0 +1,477 @@
+{
+  "1": {
+    "inputs": {
+      "unet_name": "qwen\\qwen_image_2512_fp8_e4m3fn.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Qwen-Image-2512 Transformer"
+    }
+  },
+  "2": {
+    "inputs": {
+      "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load Qwen-Image Text Encoder"
+    }
+  },
+  "3": {
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load Qwen-Image VAE"
+    }
+  },
+  "4": {
+    "inputs": {
+      "shift": 3.1,
+      "model": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "Qwen-Image-2512 Sampling Shift"
+    }
+  },
+  "5": {
+    "inputs": {
+      "lora_name": "Qwen\\ghibli_style_qwen_v3.safetensors",
+      "adapter_name": "arden",
+      "strength_model": 1.0,
+      "strength_clip": 0.0,
+      "model": [
+        "28",
+        0
+      ],
+      "clip": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "FreeFuseLoRALoader",
+    "_meta": {
+      "title": "LoRA 1: Arden"
+    }
+  },
+  "6": {
+    "inputs": {
+      "lora_name": "Qwen\\80sFantasyV2Qwen8bit.safetensors",
+      "adapter_name": "mila",
+      "strength_model": 1.0,
+      "strength_clip": 0.0,
+      "model": [
+        "5",
+        0
+      ],
+      "clip": [
+        "5",
+        1
+      ],
+      "freefuse_data": [
+        "5",
+        2
+      ]
+    },
+    "class_type": "FreeFuseLoRALoader",
+    "_meta": {
+      "title": "LoRA 2: Mila"
+    }
+  },
+  "7": {
+    "inputs": {
+      "adapter_name_1": "arden",
+      "concept_text_1": "arden_qwen, a tall explorer wearing a cobalt field jacket with silver pins, with Ghibli inspired animation style",
+      "adapter_name_2": "mila",
+      "concept_text_2": "mila_qwen, a cheerful engineer in a saffron raincoat with braided hair, 80s Fantasy Movie Still",
+      "adapter_name_3": "",
+      "concept_text_3": "",
+      "adapter_name_4": "",
+      "concept_text_4": "",
+      "enable_background": true,
+      "background_text": "rain-washed neon market street at night",
+      "freefuse_data": [
+        "6",
+        2
+      ]
+    },
+    "class_type": "FreeFuseConceptMap",
+    "_meta": {
+      "title": "Concept Mapping"
+    }
+  },
+  "8": {
+    "inputs": {
+      "prompt": [
+        "19",
+        0
+      ],
+      "filter_meaningless": true,
+      "filter_single_char": true,
+      "clip": [
+        "6",
+        1
+      ],
+      "freefuse_data": [
+        "19",
+        1
+      ]
+    },
+    "class_type": "FreeFuseTokenPositions",
+    "_meta": {
+      "title": "Compute Qwen Token Positions"
+    }
+  },
+  "19": {
+    "inputs": {
+      "prompt_prefix": "Cinematic editorial portrait of",
+      "concept_joiner": ", standing beside ",
+      "include_background": true,
+      "background_joiner": " in ",
+      "prompt_suffix": "rich fabric texture, detailed natural light",
+      "freefuse_data": [
+        "7",
+        0
+      ]
+    },
+    "class_type": "FreeFusePromptComposer",
+    "_meta": {
+      "title": "Compose Positive Prompt"
+    }
+  },
+  "9": {
+    "inputs": {
+      "text": [
+        "19",
+        0
+      ],
+      "clip": [
+        "6",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Positive Conditioning"
+    }
+  },
+  "10": {
+    "inputs": {
+      "text": "low resolution, low quality, bad anatomy, oversaturated, waxy skin, chaotic composition, blurry text, distorted text",
+      "clip": [
+        "6",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Negative Conditioning"
+    }
+  },
+  "11": {
+    "inputs": {
+      "width": 1328,
+      "height": 1328,
+      "batch_size": 1
+    },
+    "class_type": "EmptySD3LatentImage",
+    "_meta": {
+      "title": "Qwen Latent Image Size"
+    }
+  },
+  "12": {
+    "inputs": {
+      "seed": 42,
+      "steps": 4,
+      "collect_step": 2,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "collect_block": 30,
+      "collect_block_end": 30,
+      "collect_region": "output_early \u2605 (recommended)",
+      "collect_tf_index": 3,
+      "temperature": 4000.0,
+      "top_k_ratio": 0.3,
+      "disable_lora_phase1": true,
+      "bg_scale": 0.95,
+      "use_morphological_cleaning": true,
+      "balance_iterations": 15,
+      "balance_lr": 0.01,
+      "gravity_weight": 4e-05,
+      "spatial_weight": 4e-05,
+      "momentum": 0.2,
+      "centroid_margin": 0.0,
+      "border_penalty": 0.0,
+      "anisotropy": 1.3,
+      "model": [
+        "6",
+        0
+      ],
+      "conditioning": [
+        "9",
+        0
+      ],
+      "neg_conditioning": [
+        "10",
+        0
+      ],
+      "latent": [
+        "11",
+        0
+      ],
+      "freefuse_data": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "FreeFusePhase1Sampler",
+    "_meta": {
+      "title": "Phase 1: Collect Qwen Masks"
+    }
+  },
+  "14": {
+    "inputs": {
+      "enable_token_masking": true,
+      "enable_attention_bias": true,
+      "bias_scale": 5.0,
+      "positive_bias_scale": 1.0,
+      "bidirectional": true,
+      "use_positive_bias": true,
+      "bias_blocks": "all",
+      "model": [
+        "12",
+        0
+      ],
+      "masks": [
+        "30",
+        0
+      ],
+      "freefuse_data": [
+        "8",
+        0
+      ],
+      "latent": [
+        "11",
+        0
+      ]
+    },
+    "class_type": "FreeFuseMaskApplicator",
+    "_meta": {
+      "title": "Phase 2: Apply Qwen Masks"
+    }
+  },
+  "15": {
+    "inputs": {
+      "width": 512,
+      "height": 512,
+      "show_labels": true,
+      "show_coverage": true,
+      "masks": [
+        "30",
+        0
+      ]
+    },
+    "class_type": "FreeFuseMaskPreview",
+    "_meta": {
+      "title": "Detailed Mask Preview"
+    }
+  },
+  "16": {
+    "inputs": {
+      "seed": 327228017462953,
+      "steps": 4,
+      "cfg": 1.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1.0,
+      "model": [
+        "14",
+        0
+      ],
+      "positive": [
+        "9",
+        0
+      ],
+      "negative": [
+        "10",
+        0
+      ],
+      "latent_image": [
+        "11",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "Phase 2: Full Generation"
+    }
+  },
+  "17": {
+    "inputs": {
+      "samples": [
+        "16",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "18": {
+    "inputs": {
+      "filename_prefix": "FreeFuse/experiments/20260529_160601/direct_phase1/final",
+      "images": [
+        "17",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Final Output"
+    }
+  },
+  "28": {
+    "inputs": {
+      "lora_name": "Qwen\\Qwen-Image-Lightning-4steps-V2.0-bf16.safetensors",
+      "strength_model": 1.0,
+      "model": [
+        "4",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "Qwen Lightning 4-step LoRA"
+    }
+  },
+  "29": {
+    "inputs": {
+      "samples": [
+        "12",
+        3
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "Decode Phase 1 x0 Preview"
+    }
+  },
+  "30": {
+    "inputs": {
+      "mask_bank": [
+        "12",
+        1
+      ],
+      "image": [
+        "29",
+        0
+      ],
+      "freefuse_data": [
+        "8",
+        0
+      ],
+      "use_ultralytics": true,
+      "ultralytics_model": "segm\\person_yolov8m-seg.pt",
+      "use_sam": true,
+      "sam_checkpoint": "sam_vit_b_01ec64.pth",
+      "detector_confidence": 0.25,
+      "assignment_threshold": 0.02,
+      "phase_threshold": 0.25,
+      "gate_dilation_px": 96,
+      "min_refined_coverage": 0.003,
+      "max_refined_coverage": 0.75,
+      "detector_device": "auto",
+      "sam_device": "auto",
+      "keep_models_loaded": false,
+      "write_debug_stats": true,
+      "stats_prefix": "FreeFuse/experiments/20260529_160601/direct_phase1/refiner_stats"
+    },
+    "class_type": "FreeFuseSAMMaskRefiner",
+    "_meta": {
+      "title": "Refine Masks from Phase 1 Preview"
+    }
+  },
+  "90": {
+    "inputs": {
+      "images": [
+        "12",
+        2
+      ],
+      "filename_prefix": "FreeFuse/experiments/20260529_160601/direct_phase1/phase1_mask_preview"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Phase 1 Mask Preview"
+    }
+  },
+  "91": {
+    "inputs": {
+      "images": [
+        "29",
+        0
+      ],
+      "filename_prefix": "FreeFuse/experiments/20260529_160601/direct_phase1/phase1_preview_decode"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Decoded Phase 1 Preview"
+    }
+  },
+  "92": {
+    "inputs": {
+      "images": [
+        "30",
+        1
+      ],
+      "filename_prefix": "FreeFuse/experiments/20260529_160601/direct_phase1/refined_overlay"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Refined Overlay"
+    }
+  },
+  "93": {
+    "inputs": {
+      "images": [
+        "30",
+        2
+      ],
+      "filename_prefix": "FreeFuse/experiments/20260529_160601/direct_phase1/refined_individual_masks"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Refined Individual Masks"
+    }
+  },
+  "94": {
+    "inputs": {
+      "images": [
+        "15",
+        0
+      ],
+      "filename_prefix": "FreeFuse/experiments/20260529_160601/direct_phase1/refined_detailed_masks"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Refined Detailed Masks"
+    }
+  }
+}
