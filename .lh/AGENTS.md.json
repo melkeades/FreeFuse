@@ -3,7 +3,7 @@
     "activeCommit": 0,
     "commits": [
         {
-            "activePatchIndex": 6,
+            "activePatchIndex": 7,
             "patches": [
                 {
                     "date": 1779986233644,
@@ -32,6 +32,10 @@
                 {
                     "date": 1780057900555,
                     "content": "Index: \n===================================================================\n--- \n+++ \n@@ -2,4 +2,5 @@\n Do not revert to qwen 50 steps workflow, keep it 4 steps.\r\n Use Comfyui python H:\\cg-git\\comfy-port\\python_embeded\r\n Monitor the shared gpu memory, if vram is full and shared memory starts rising it is bad code, fix.\r\n Always check the final image quality and adherence to the prompt.\r\n+Use the \\freefuse_comfyui\\workflows\\qwen_image_2512_freefuse_with_editor.json as the primary test workflow.\n\\ No newline at end of file\n"
+                },
+                {
+                    "date": 1780067393056,
+                    "content": "Index: \n===================================================================\n--- \n+++ \n@@ -1,6 +1,8 @@\n+Run ComfyUI bat \"H:\\cg-git\\comfy-port\\run_nvidia_gpu.bat\" in Windows Terminal app for visibility.\r\n Do not change LoRAs.\r\n Do not revert to qwen 50 steps workflow, keep it 4 steps.\r\n-Use Comfyui python H:\\cg-git\\comfy-port\\python_embeded\r\n-Monitor the shared gpu memory, if vram is full and shared memory starts rising it is bad code, fix.\r\n-Always check the final image quality and adherence to the prompt.\r\n+If needed Use Comfyui python H:\\cg-git\\comfy-port\\python_embeded (not global).\r\n+Monitor the shared gpu memory, if vram is full and shared memory starts rising (above 1gb) try to fix but after the quality of the image always prioritize speed (tokens per second) not just vram stats.\r\n+Always check the final image quality, masks and adherence to the prompt.\r\n Use the \\freefuse_comfyui\\workflows\\qwen_image_2512_freefuse_with_editor.json as the primary test workflow.\r\n+Unload the models and clear cache when restarting the comfyui process.\r\n"
                 }
             ],
             "date": 1779986233644,
